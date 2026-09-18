@@ -8,8 +8,8 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 # npm ci needs the full workspace tree (apps/* + packages/*) plus manifests.
 COPY . .
-# npm ci on a workspace hoists all deps into /app/node_modules.
-RUN npm ci --workspace @expense-app/api --include-workspace-root
+# Install ALL workspaces incl. devDeps so `tsx` + `prisma` are available.
+RUN npm ci --include-workspace-root
 WORKDIR /app/apps/api
 RUN npx prisma generate
 
@@ -40,6 +40,6 @@ EXPOSE 3000
 
 # /app/.env is mounted from apps/api/.env on the VPS (never baked in).
 ENTRYPOINT ["./docker-entrypoint.sh"]
-# `--import=tsx` registers tsx's ESM loader so the bundled server.js can still
+# `npx tsx` registers tsx's ESM loader so the bundled server.js can still
 # resolve the workspace source package @expense-app/shared/src/index.ts at runtime.
-CMD ["node", "--import=tsx", "dist/server.js"]
+CMD ["npx", "--no-install", "tsx", "dist/server.js"]
