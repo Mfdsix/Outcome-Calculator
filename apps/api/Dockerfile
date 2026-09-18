@@ -20,6 +20,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/prisma ./apps/api/prisma
 COPY apps/api ./apps/api
 COPY packages ./packages
+
+# Compile the @expense-app/shared workspace source to ES modules so the
+# runtime image can import it without a TS loader (shared/package.json
+# exports points at ./src/index.ts in dev).
+WORKDIR /app/packages/shared
+RUN npx tsc src/index.ts --outDir dist --module esnext --target es2022 \
+    --moduleResolution bundler --declaration --emitDeclarationOnly false \
+    --skipLibCheck
+
 WORKDIR /app/apps/api
 RUN npm run build
 
@@ -30,16 +39,19 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 # Required: @expense-app/shared is a workspace package imported by dist/server.js.
 COPY packages ./packages
+COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh
 WORKDIR /app/apps/api
+
+# Point the shared package at its compiled entry (no source .ts at runtime).
+RUN node --input-type=commonjs -e "const fs=require('fs');const p='../packages/shared/package.json';const J=JSON.parse(fs.readFileSync(p,'utf8'));J.main='./dist/index.js';J.exports['./']='./dist/index.js';fs.writeFileSync(p,JSON.stringify(J,null,2))"
+
 RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 3000
 
 # /app/.env is mounted from apps/api/.env on the VPS (never baked in).
 ENTRYPOINT ["./docker-entrypoint.sh"]
-# `npx tsx` registers tsx's ESM loader so the bundled server.js can still
-# resolve the workspace source package @expense-app/shared/src/index.ts at runtime.
-CMD ["npx", "--no-install", "tsx", "dist/server.js"]
+CMD ["node", "dist/server.js"]
