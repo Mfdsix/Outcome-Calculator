@@ -5,6 +5,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+# Copy root manifests so `npm ci` has the workspace package.json + lockfile.
+COPY package.json package-lock.json* ./
+
 # Install deps for the web workspace (uses root lockfile + workspaces).
 RUN npm ci --workspace @expense-app/web --include-workspace-root
 
