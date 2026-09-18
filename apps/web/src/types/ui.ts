@@ -5,7 +5,7 @@ export type Period = "day" | "week" | "month";
  * - "calculator": half-D default — Header / AmountDisplay / navbar /
  *   hourly BarChart / calc Keypad.
  * - "special": D/W/M browse — navbar + SummaryList/BrowseList + chart
- *   selectedKey + special Keypad + ControlBar, with drill-down into a
+ *   selectedKey + special Keypad, with drill-down into a
  *   selected bucket.
  */
 export type ViewMode = "calculator" | "special";

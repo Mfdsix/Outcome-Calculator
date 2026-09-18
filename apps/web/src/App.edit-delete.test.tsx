@@ -74,8 +74,8 @@ async function openSpecialWithRows(rows: Array<{ id: string; amount: number }>):
   await screen.findByTestId("summary-list");
 }
 
-describe("App — edit (TODO: history affordance — control-bar removed in spec gabungan)", () => {
-  // Edit/hapus tidak di-render di special mode (plan: history without ControlBar).
+describe("App — edit (history affordance removed: history without ControlBar)", () => {
+  // Edit/hapus tidak di-render di special mode (history without ControlBar).
   // Handler handleEdit/confirmDelete + DeleteDialog tetap ada di App.tsx sebagai
   // dead code yang siap dipasangkan affordance baru. Skip sampai UI-nya kembali.
   it.skip("loads selected expense into the calculator and updates it on enter (pending history edit affordance)", async () => {

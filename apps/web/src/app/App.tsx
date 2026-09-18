@@ -12,6 +12,7 @@ import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { LockScreen } from "../components/LockScreen";
 import { SummaryList } from "../components/SummaryList";
+import { UpdateDialog } from "../components/UpdateDialog";
 import { UserMenu } from "../components/UserMenu";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
@@ -239,6 +240,7 @@ function AppBody({ logout }: { logout: () => void }) {
   const calc = useCalculator();
   const [flash, setFlash] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -266,15 +268,17 @@ function AppBody({ logout }: { logout: () => void }) {
     };
   }, []);
 
-  // In drill mode the selection addresses transactions (expense ids):
-  // default to the newest row; drop a selection that no longer exists.
-  // In summary mode the selection addresses chart buckets — no auto-select.
+  /** Transaction-facing modes (day summary + drill) default to the newest row;
+   * otherwise no auto-selection. Drop a selection that no longer resolves to
+   * a live expense.
+   */
   useEffect(() => {
-    if (!inDrill || expenses.length === 0) return;
+    const isTxMode = inDrill || period === "day";
+    if (!isTxMode || expenses.length === 0) return;
     if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
       setSelectedKey(expenses[0]?.id ?? null);
     }
-  }, [expenses, inDrill, selectedKey, setSelectedKey]);
+  }, [expenses, inDrill, period, selectedKey, setSelectedKey]);
 
   /** In drill mode the transaction-facing selection lives in a second slot
    * so the bucket selection (chart) is preserved for when we go back up. */
@@ -284,14 +288,11 @@ function AppBody({ logout }: { logout: () => void }) {
   }
   const transactionKey = transactionKeyRef.current;
 
-  const handleEnter = useCallback(async () => {
-    const amount = calc.amount;
-    if (amount <= 0) return;
-
-    if (calc.isEditing && calc.editingId) {
-      const id = calc.editingId;
+  /** Commit a pending edit: optimistic update + API call + flash/error.
+   *  Extracted so handleEnter and UpdateDialog confirm share one path. */
+  const commitUpdate = useCallback(
+    async (id: string, amount: number) => {
       const previous = expenses.find((item) => item.id === id);
-      calc.clear();
       if (previous) {
         applyOptimisticUpdate({ ...previous, amount });
       }
@@ -306,6 +307,27 @@ function AppBody({ logout }: { logout: () => void }) {
           return;
         }
         showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
+      }
+    },
+    [expenses, applyOptimisticUpdate, doFlash, logout, showError],
+  );
+
+  const handleEnter = useCallback(async () => {
+    const amount = calc.amount;
+    if (amount <= 0) return;
+
+    if (calc.isEditing && calc.editingId) {
+      const id = calc.editingId;
+      const previous = expenses.find((item) => item.id === id);
+      if (previous && previous.amount === amount) {
+        // No change — dismiss edit silently.
+        calc.clear();
+        return;
+      }
+      if (previous && previous.amount !== amount) {
+        // Defer to UpdateDialog; keep the input so the user can review.
+        setPendingUpdate({ id, amount });
+        return;
       }
       return;
     }
@@ -330,7 +352,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, applyOptimisticUpdate, doFlash, logout, showError]);
+  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError]);
 
   // --- Special-mode data -------------------------------------------------------
 
@@ -341,6 +363,27 @@ function AppBody({ logout }: { logout: () => void }) {
         : dailyBuckets(period, currentPeriodRange(period), expenses, new Date()),
     [period, expenses],
   );
+
+  /**
+   * Selection key fed to BarChart. In bucket-facing modes (W/M summary) the
+   * selectedKey IS a bucket key. In transaction-facing modes (day summary /
+   * drill) it is an expense id — derive the matching hour/day bucket so the
+   * chart stays in sync without mixing id domains.
+   */
+  const chartSelectedKey = useMemo(() => {
+    if (inDrill) {
+      // Highlight the day being drilled.
+      return drillDayKey;
+    }
+    if (period === "day") {
+      const tx = expenses.find((item) => item.id === selectedKey);
+      if (!tx) return selectedKey; // no selection yet — let BarChart fall back to current hour
+      const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
+      return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
+    }
+    // W/M: selectedKey is already a bucket (day) key.
+    return selectedKey;
+  }, [inDrill, period, selectedKey, expenses, drillDayKey]);
 
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
@@ -359,42 +402,70 @@ function AppBody({ logout }: { logout: () => void }) {
     [expenses, selectedKey, setSelectedKey],
   );
 
+  const MODE_ORDER: Period[] = ["day", "week", "month"];
+
   const handleNavigate = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
-      if (inDrill) {
-        moveTransactionSelection(direction);
-        return;
+      switch (direction) {
+        case "left": {
+          if (period === "day") return;
+          const order: Period[] = ["day", "week", "month"];
+          const idx = order.indexOf(period);
+          if (idx <= 0) return;
+          openHistory(order[idx - 1]);
+          return;
+        }
+        case "right": {
+          if (period === "month") return;
+          const order: Period[] = ["day", "week", "month"];
+          const idx = order.indexOf(period);
+          if (idx >= order.length - 1) return;
+          openHistory(order[idx + 1]);
+          return;
+        }
+        case "up":
+        case "down": {
+          if (inDrill) {
+            moveTransactionSelection(direction);
+            return;
+          }
+          if (period === "day") {
+            moveTransactionSelection(direction);
+            return;
+          }
+          const keys = chartBuckets.map((bucket) => bucket.key);
+          if (keys.length === 0) return;
+          const index = keys.indexOf(selectedKey ?? "");
+          const valid = index < 0 ? 0 : index;
+          const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
+          setSelectedKey(keys[next] ?? null);
+          return;
+        }
       }
-
-      const keys = chartBuckets.map((bucket) => bucket.key);
-      if (keys.length === 0) return;
-      const index = keys.indexOf(selectedKey ?? "");
-      const valid = index < 0 ? 0 : index;
-      let next: number;
-      if (direction === "up" || direction === "down") {
-        next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
-      } else {
-        // left/right = page jump of ±5 through buckets.
-        next = Math.min(keys.length - 1, Math.max(0, valid + (direction === "right" ? 5 : -5)));
-      }
-      setSelectedKey(keys[next] ?? null);
     },
-    [inDrill, chartBuckets, selectedKey, setSelectedKey, moveTransactionSelection],
+    [openHistory, period, inDrill, moveTransactionSelection, chartBuckets, selectedKey, setSelectedKey],
   );
 
-  const handleSpecialEnter = useCallback(() => {
-    if (inDrill) return;
-    // Enter drills into the highlighted bucket — the selected one, or the
-    // default current hour/day when nothing has been picked yet. Day view
-    // buckets are hourly keys "YYYY-MM-DDTHH"; week/month buckets are civil
-    // day keys "YYYY-MM-DD". Drill always operates on the day part.
-    const fallback = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
-    const target = selectedKey ?? fallback;
-    if (target && chartBuckets.some((bucket) => bucket.key === target)) {
-      setDrillDayKey(target.slice(0, 10));
-      enterDrill();
+  const navDisabled = useMemo<Partial<Record<"up" | "down" | "left" | "right", boolean>>>(() => {
+    const domainKeys =
+      inDrill || period === "day"
+        ? expenses.map((e) => e.id)
+        : chartBuckets.map((b) => b.key);
+
+    if (domainKeys.length === 0) {
+      return { up: true, down: true, left: period === "day", right: period === "month" };
     }
-  }, [chartBuckets, enterDrill, inDrill, selectedKey]);
+    const idx = domainKeys.indexOf(selectedKey ?? "");
+    const valid = idx < 0 ? 0 : idx;
+    const last = domainKeys.length - 1;
+
+    return {
+      up: valid === 0,
+      down: valid === last,
+      left: period === "day",
+      right: period === "month",
+    };
+  }, [inDrill, period, expenses, chartBuckets, selectedKey]);
 
   const handleEdit = useCallback(() => {
     const id = inDrill ? transactionKey : selectedKey;
@@ -404,11 +475,40 @@ function AppBody({ logout }: { logout: () => void }) {
     closeHistory();
   }, [calc, expenses, inDrill, selectedKey, closeHistory, transactionKey]);
 
+  const handleSpecialEnter = useCallback(() => {
+    // Drill / day-summary: Enter edits the selected transaction directly.
+    if (inDrill || period === "day") {
+      handleEdit();
+      return;
+    }
+    // Week/Month summary: Enter drills into the highlighted day bucket.
+    const fallback = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
+    const target = selectedKey ?? fallback;
+    if (target && chartBuckets.some((bucket) => bucket.key === target)) {
+      setDrillDayKey(target.slice(0, 10));
+      enterDrill();
+    }
+  }, [chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey]);
+
+  /**
+   * Request to delete the currently edited transaction (backspace-in-edit-mode
+   * path). If no transaction is being edited, no-op.
+   */
+  const handleDeleteRequest = useCallback(() => {
+    const id = calc.editingId;
+    if (!id) return;
+    setDeleteTarget(id);
+  }, [calc.editingId]);
+
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
     if (!id) return;
     const expense = expenses.find((item) => item.id === id);
     setDeleteTarget(null);
+    // Drop an in-progress edit if we are deleting the very item being edited.
+    if (calc.editingId === id) {
+      calc.clear();
+    }
     applyOptimisticDelete(id);
     try {
       await expensesApi.remove(id);
@@ -420,7 +520,16 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [applyOptimisticCreate, applyOptimisticDelete, deleteTarget, expenses, logout, showError]);
+  }, [applyOptimisticCreate, applyOptimisticDelete, calc, deleteTarget, expenses, logout, showError]);
+
+  const confirmUpdate = useCallback(async () => {
+    const pending = pendingUpdate;
+    if (!pending) return;
+    setPendingUpdate(null);
+    await commitUpdate(pending.id, pending.amount);
+  }, [pendingUpdate, commitUpdate]);
+
+  // --- Keyboard (spec §25) -----------------------------------------------------
 
   // --- Keyboard (spec §25) -----------------------------------------------------
 
@@ -434,6 +543,10 @@ function AppBody({ logout }: { logout: () => void }) {
           setDeleteTarget(null);
           return;
         }
+        if (pendingUpdate) {
+          setPendingUpdate(null);
+          return;
+        }
         if (calc.isEditing) {
           calc.clear();
           return;
@@ -443,7 +556,7 @@ function AppBody({ logout }: { logout: () => void }) {
         return;
       }
 
-      if (deleteTarget) return; // modal decision pending — ignore other keys
+      if (deleteTarget || pendingUpdate) return; // modal decision pending — ignore other keys
 
       if (isSpecial) {
         if (event.key === "ArrowUp") {
@@ -463,6 +576,15 @@ function AppBody({ logout }: { logout: () => void }) {
           handleSpecialEnter();
         }
         return;
+      }
+
+      if (calc.isEditing) {
+        // In edit mode digits still append. Backspace removes the edited item.
+        if (event.key === "Backspace") {
+          event.preventDefault();
+          handleDeleteRequest();
+          return;
+        }
       }
 
       if (/^[0-9]$/.test(event.key)) {
@@ -489,6 +611,27 @@ function AppBody({ logout }: { logout: () => void }) {
     exitDrill,
     closeHistory,
   ]);
+
+  /** Clicking a chart bar: in day mode resolve to the first transaction in
+   * that hour bucket (selections stay in the transaction-id domain); otherwise
+   * the bucket key is the selection directly. */
+  const handleBarSelect = useCallback(
+    (key: string) => {
+      if (period === "day" && !inDrill) {
+        const hourKey = key.slice(11, 13);
+        const tx = expenses.find((item) => {
+          const parts = getZonedParts(new Date(item.occurredAt), APP_TIMEZONE);
+          return String(parts.hour).padStart(2, "0") === hourKey;
+        });
+        if (tx) {
+          setSelectedKey(tx.id);
+          return;
+        }
+      }
+      setSelectedKey(key);
+    },
+    [period, inDrill, expenses, setSelectedKey],
+  );
 
   // --- Derived rows --------------------------------------------------------------
 
@@ -517,12 +660,23 @@ function AppBody({ logout }: { logout: () => void }) {
 
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
+    // Day summary lists individual transactions; W/M summary lists per-day
+    // aggregates from the chart buckets.
+    if (period === "day") {
+      return expenses.map((item) => ({
+        key: item.id,
+        left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
+        mid: formatDateShort(new Date(item.occurredAt), APP_TIMEZONE),
+        right: groupDigits(String(item.amount)),
+        id: item.id,
+      }));
+    }
     return chartBuckets.map((bucket) => ({
       key: bucket.key,
-      left: bucket.kind === "hour" ? `${bucket.key.slice(11, 13)}:00` : dateLabelFromKey(bucket.key),
+      left: dateLabelFromKey(bucket.key),
       right: groupDigits(String(bucket.total)),
     }));
-  }, [chartBuckets, inDrill]);
+  }, [inDrill, period, expenses, chartBuckets]);
 
   const deleteLabel = (() => {
     const expense = expenses.find((item) => item.id === deleteTarget);
@@ -580,21 +734,27 @@ function AppBody({ logout }: { logout: () => void }) {
           <div className="shrink-0">
             <BarChart
               buckets={chartBuckets}
-              selectedKey={selectedKey}
-              onSelect={(key) => setSelectedKey(key)}
+              selectedKey={chartSelectedKey}
+              onSelect={handleBarSelect}
             />
           </div>
 
-          {/* TODO: history edit/hapus affordance — handleEdit/confirmDelete kept but
-              not surfaced yet (plan: history without ControlBar). */}
           <Keypad
             layout="special"
             onDigit={() => {}}
             onBackspace={() => {}}
             onEnter={handleSpecialEnter}
-            enterDisabled={inDrill}
+            enterDisabled={
+              inDrill
+                ? transactionKey === null
+                : period === "day"
+                  ? expenses.length === 0
+                  : chartBuckets.length === 0
+            }
             onNavigate={handleNavigate}
+            navDisabled={navDisabled}
           />
+
         </>
       ) : (
         <>
@@ -603,7 +763,16 @@ function AppBody({ logout }: { logout: () => void }) {
             onDigit={calc.pressDigit}
             onBackspace={calc.pressBackspace}
             onEnter={() => void handleEnter()}
-            enterDisabled={calc.amount <= 0}
+             enterDisabled={
+               calc.amount <= 0 ||
+               Boolean(
+                 calc.isEditing &&
+                 calc.editingId &&
+                 expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
+               )
+             }
+            isEditing={calc.isEditing}
+            onDeleteRequest={() => setDeleteTarget(calc.editingId)}
           />
         </>
       )}
@@ -614,6 +783,16 @@ function AppBody({ logout }: { logout: () => void }) {
           busy={false}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => void confirmDelete()}
+        />
+      )}
+
+      {pendingUpdate && (
+        <UpdateDialog
+          fromLabel={formatIDR(expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0)}
+          toLabel={formatIDR(pendingUpdate.amount)}
+          busy={false}
+          onCancel={() => setPendingUpdate(null)}
+          onConfirm={() => void confirmUpdate()}
         />
       )}
     </div>

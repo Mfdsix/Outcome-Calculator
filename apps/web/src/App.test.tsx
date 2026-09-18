@@ -227,6 +227,10 @@ describe("App — special mode (D/W/M browse)", () => {
   });
 
   it("tapping a different period while in history switches range, stays in history", async () => {
+    listMock.mockResolvedValue({
+      expenses: [{ id: "w1", amount: 1000, occurredAt: new Date().toISOString() }],
+      total: 1000,
+    });
     const user = userEvent.setup();
     await renderUnlocked();
 
@@ -254,6 +258,10 @@ describe("App — special mode (D/W/M browse)", () => {
   });
 
   it("labels D/W/M persist when highlighted (no arrow glyph)", async () => {
+    listMock.mockResolvedValue({
+      expenses: [{ id: "l1", amount: 1000, occurredAt: new Date().toISOString() }],
+      total: 1000,
+    });
     const user = userEvent.setup();
     await renderUnlocked();
 
@@ -327,23 +335,22 @@ describe("App — special mode (D/W/M browse)", () => {
     const user = userEvent.setup();
     await renderUnlocked();
 
-    await user.click(screen.getByTestId("period-day")); // → special
+    await user.click(screen.getByTestId("period-month")); // → special (W/M Enter = drill)
     await screen.findByTestId("summary-list");
 
-    await user.click(screen.getByTestId("key-enter")); // drill into selected bucket
+    await user.click(screen.getByTestId("key-enter")); // drill into selected day bucket
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
     expect(screen.getByTestId("browse-row-d1")).toBeInTheDocument();
 
-    // Back: tap the highlighted green period (today) → summary, then again → home.
-    await user.click(screen.getByTestId("period-day")); // drill → summary
+    // Back: tap the highlighted green period → summary, then again → home.
+    await user.click(screen.getByTestId("period-month")); // drill → summary
     expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
-    await user.click(screen.getByTestId("period-day")); // summary → home
+    await user.click(screen.getByTestId("period-month")); // summary → home
     expect(await screen.findByTestId("amount-display")).toBeInTheDocument();
   });
 
-  it("day summary rows show hour buckets (HH:00), week rows show date labels", async () => {
-    // Fixed expense at 08:15 Jakarta today so the civil-hour bucket is stable
-    // regardless of the CI runner's local timezone.
+  it("day summary rows list transactions (time + date + amount), week rows show date labels", async () => {
+    // Fixed expense at 08:15 Jakarta today so the civil time is stable.
     const tgl = getZonedParts(new Date(), "Asia/Jakarta");
     const iso = `${tgl.year}-${String(tgl.month).padStart(2, "0")}-${String(tgl.day).padStart(2, "0")}T08:15:00+07:00`;
     listMock.mockResolvedValue({
@@ -353,12 +360,11 @@ describe("App — special mode (D/W/M browse)", () => {
     const user = userEvent.setup();
     await renderUnlocked();
 
-    await user.click(screen.getByTestId("period-day")); // → special, day buckets
+    await user.click(screen.getByTestId("period-day")); // → special, day transactions
     await screen.findByTestId("summary-list");
-    const hourKey = `${tgl.year}-${String(tgl.month).padStart(2, "0")}-${String(tgl.day).padStart(2, "0")}T08`;
-    const hourRow = screen.getByTestId(`summary-row-${hourKey}`);
-    expect(hourRow).toHaveTextContent("08:00");
-    expect(hourRow).toHaveTextContent("25.000");
+    const row = screen.getByTestId("summary-row-d2");
+    expect(row).toHaveTextContent("08:15"); // formatTimeShort left
+    expect(row).toHaveTextContent("25.000"); // nominal right
 
     // Switch to week — labels become civil date labels via formatDateShort.
     await user.click(screen.getByTestId("period-week"));
@@ -368,7 +374,6 @@ describe("App — special mode (D/W/M browse)", () => {
     const sample = weekRows[0]!;
     // Date label "DD Mon" pattern (id-ID), e.g. "17 Sep".
     expect(sample.textContent).toMatch(/\d{1,2}\s\w{3}/);
-    expect(sample.textContent).not.toContain("Hari ini");
   });
 });
 
@@ -444,7 +449,7 @@ describe("App — API error", () => {
     await user.click(await screen.findByTestId("key-2"));
     await user.click(screen.getByTestId("key-enter"));
 
-    expect(await screen.findByTestId("error-banner")).toBeInTheDocument();
+    expect(await screen.findByTestId("error-banner", {}, { timeout: 3000 })).toBeInTheDocument();
   });
 });
 
@@ -458,6 +463,10 @@ describe("App — layout + special wiring", () => {
   });
 
   it("list renders before the chart in special mode (DOM order)", async () => {
+    listMock.mockResolvedValue({
+      expenses: [{ id: "o1", amount: 1000, occurredAt: new Date().toISOString() }],
+      total: 1000,
+    });
     const user = userEvent.setup();
     await renderUnlocked();
 

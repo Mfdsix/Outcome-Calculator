@@ -8,9 +8,15 @@ export interface KeypadProps {
   onEnter: () => void;
   enterDisabled: boolean;
   disabled?: boolean;
-  /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert. */
+  /** Calculator mode: when editing, the backspace slot becomes a red delete
+   * button that requests deletion of the edited transaction. */
+  isEditing?: boolean;
+   onDeleteRequest?: () => void;
+   /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
+    * navDisabled (special mode only) dims + disables individual directions. */
   layout?: "calc" | "special";
   onNavigate?: (direction: "up" | "down" | "left" | "right") => void;
+  navDisabled?: Partial<Record<"up" | "down" | "left" | "right", boolean>>;
 }
 
 /**
@@ -26,21 +32,24 @@ export function Keypad({
   onEnter,
   enterDisabled,
   disabled,
+  isEditing,
+  onDeleteRequest,
   layout = "calc",
   onNavigate,
+  navDisabled,
 }: KeypadProps) {
   const isSpecial = layout === "special";
 
   type Spec = { label: string; testid: string; aria: string };
   const specs: Spec[] = [
     { label: "1", testid: "key-1", aria: "Digit 1" },
-    { label: "↑", testid: "key-2", aria: "Up" },
+    { label: "2", testid: "key-2", aria: "Digit 2" },
     { label: "3", testid: "key-3", aria: "Digit 3" },
-    { label: "←", testid: "key-4", aria: "Left" },
+    { label: "4", testid: "key-4", aria: "Digit 4" },
     { label: "5", testid: "key-5", aria: "Digit 5" },
-    { label: "→", testid: "key-6", aria: "Right" },
+    { label: "6", testid: "key-6", aria: "Digit 6" },
     { label: "7", testid: "key-7", aria: "Digit 7" },
-    { label: "↓", testid: "key-8", aria: "Down" },
+    { label: "8", testid: "key-8", aria: "Digit 8" },
     { label: "9", testid: "key-9", aria: "Digit 9" },
   ];
 
@@ -49,7 +58,7 @@ export function Keypad({
       key={spec.testid}
       type="button"
       data-testid={spec.testid}
-      aria-label={spec.aria}
+      aria-label={`Digit ${digit}`}
       disabled={disabled}
       onClick={() => onDigit(digit)}
       className="key-button disabled:opacity-40"
@@ -58,21 +67,21 @@ export function Keypad({
     </button>
   );
 
-  const navButton = (spec: Spec, direction: "up" | "down" | "left" | "right"): ReactElement => (
+  const navButton = (spec: Spec, label: string, direction: "up" | "down" | "left" | "right"): ReactElement => (
     <button
       key={spec.testid}
       type="button"
       data-testid={spec.testid}
       aria-label={spec.aria}
-      disabled={disabled}
+      disabled={disabled || navDisabled?.[direction]}
       onClick={() => onNavigate?.(direction)}
-      className="key-button"
+      className="key-button disabled:opacity-40"
     >
-      {spec.label}
+      {label}
     </button>
   );
 
-  const inertButton = (spec: Spec): ReactElement => (
+  const inertButton = (spec: Spec, label: string): ReactElement => (
     <button
       key={spec.testid}
       type="button"
@@ -82,7 +91,7 @@ export function Keypad({
       onClick={() => {}}
       className="key-button disabled:opacity-40"
     >
-      {spec.label}
+      {label}
     </button>
   );
 
@@ -90,39 +99,28 @@ export function Keypad({
     if (isSpecial) {
       switch (spec.testid) {
         case "key-2":
-          return navButton(spec, "up");
+          return navButton(spec, "↑", "up");
         case "key-4":
-          return navButton(spec, "left");
+          return navButton(spec, "←", "left");
         case "key-6":
-          return navButton(spec, "right");
+          return navButton(spec, "→", "right");
         case "key-8":
-          return navButton(spec, "down");
+          return navButton(spec, "↓", "down");
+        default:
+          return inertButton(spec, spec.label);
       }
     }
-    switch (spec.testid) {
-      case "key-1":
-        return digitButton(spec, "1");
-      case "key-3":
-        return digitButton(spec, "3");
-      case "key-5":
-        return digitButton(spec, "5");
-      case "key-7":
-        return digitButton(spec, "7");
-      case "key-9":
-        return digitButton(spec, "9");
-      default:
-        return inertButton(spec);
-    }
+    return digitButton(spec, spec.label);
   };
 
   return (
     <div className="grid grid-cols-3 gap-2 pb-4" data-testid="keypad">
       {specs.map((spec) => renderCell(spec))}
 
-      <button
+            <button
         type="button"
         data-testid="key-0"
-        aria-label={isSpecial ? "Digit 0" : "Digit 0"}
+        aria-label="Digit 0"
         disabled={isSpecial ? true : disabled}
         onClick={() => (!isSpecial ? onDigit("0") : undefined)}
         className="key-button disabled:opacity-40"
@@ -133,10 +131,16 @@ export function Keypad({
       <button
         type="button"
         data-testid="key-backspace"
-        aria-label="Backspace"
-        disabled={isSpecial ? true : disabled}
-        onClick={() => (!isSpecial ? onBackspace() : undefined)}
-        className="key-button text-neutral-300 disabled:opacity-40"
+        aria-label={isSpecial ? "Backspace" : isEditing ? "Delete expense" : "Backspace"}
+        disabled={isSpecial ? true : isEditing ? false : disabled}
+        onClick={() =>
+          isSpecial
+            ? undefined
+            : isEditing
+              ? onDeleteRequest?.()
+              : onBackspace()
+        }
+        className={`key-button ${isEditing && !isSpecial ? "text-red-400" : "text-neutral-300"} disabled:opacity-40`}
       >
         ⌫
       </button>
