@@ -95,3 +95,20 @@ export function hourlyBuckets(
     kind: "hour" as const,
   }));
 }
+
+/**
+ * Sparse per-day aggregation for the W/M summary list — only days that
+ * actually have expenses appear (no zero rows). In APP_TIMEZONE; newest-first
+ * to match day-summary & drill ordering. Pure; safe to unit-test.
+ */
+export function groupExpensesByDay(expenses: ExpenseDto[]): Array<{ key: string; total: number }> {
+  const totals = new Map<string, number>();
+  for (const expense of expenses) {
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    totals.set(key, (totals.get(key) ?? 0) + expense.amount);
+  }
+  return Array.from(totals.entries())
+    .map(([key, total]) => ({ key, total }))
+    .sort((a, b) => b.key.localeCompare(a.key));
+}

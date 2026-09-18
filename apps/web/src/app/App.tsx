@@ -25,7 +25,7 @@ import {
   expensesApi,
   setAuthToken,
 } from "../lib/api";
-import { dailyBuckets, hourlyBuckets } from "../lib/chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
 import type { EditOrigin, Period } from "../types/ui";
@@ -699,10 +699,10 @@ function AppBody({ logout }: { logout: () => void }) {
         id: item.id,
       }));
     }
-    return chartBuckets.map((bucket) => ({
-      key: bucket.key,
-      left: dateLabelFromKey(bucket.key),
-      right: groupDigits(String(bucket.total)),
+    return groupExpensesByDay(expenses).map((day) => ({
+      key: day.key,
+      left: dateLabelFromKey(day.key),
+      right: groupDigits(String(day.total)),
     }));
   }, [inDrill, period, expenses, chartBuckets]);
 

@@ -10,13 +10,14 @@ export interface UserMenuProps {
   onAccountDeleted: () => void;
 }
 
-/**
- * Profile entry point (plan §3): user icon in the navbar's trailing slot.
- * Shows the masked PIN (never the raw passcode), the logout item, and the
- * destructive "Hapus akun" item (red, below a second divider) which opens a
- * PIN-confirmation dialog owned by this component. Closes via tap-outside,
- * Escape, or after logout/deletion.
- */
+  /**
+   * Profile entry point (plan §3): user icon in the navbar's trailing slot.
+   * Shows the masked PIN (never the raw passcode), then a single divider and
+   * the action items: "Hapus akun" (red + trash icon) and "Keluar" (neutral +
+   * logout icon). The destructive delete flow opens a PIN-confirmation dialog
+   * owned by this component. Closes via tap-outside, Escape, or after
+   * logout/deletion.
+   */
 export function UserMenu({ onLogout, onAccountDeleted }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -112,34 +113,66 @@ export function UserMenu({ onLogout, onAccountDeleted }: UserMenuProps) {
             <span className="text-xs text-neutral-500">PIN</span>
             <span className="text-sm font-medium tabular-nums text-neutral-200">••••••</span>
           </div>
-          <div className="mx-3 border-t border-neutral-800" />
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="user-menu-logout"
-            onClick={() => {
-              setOpen(false);
-              onLogout();
-            }}
-            className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
-          >
-            Keluar
-          </button>
-          <div className="mx-3 border-t border-neutral-800" />
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="user-menu-delete-account"
-            onClick={() => {
-              setOpen(false);
-              setDialogError(null);
-              setShowDeleteDialog(true);
-            }}
-            className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
-          >
-            Hapus akun
-          </button>
-        </div>
+           <div className="mx-3 border-t border-neutral-800" />
+           <button
+             type="button"
+             role="menuitem"
+             data-testid="user-menu-delete-account"
+             onClick={() => {
+               setOpen(false);
+               setDialogError(null);
+               setShowDeleteDialog(true);
+             }}
+             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
+           >
+             <svg
+               width="16"
+               height="16"
+               viewBox="0 0 24 24"
+               fill="none"
+               stroke="currentColor"
+               strokeWidth="1.8"
+               strokeLinecap="round"
+               strokeLinejoin="round"
+               aria-hidden="true"
+             >
+               <path d="M3 6h18" />
+               <path d="M9 9V4a3 3 0 0 1 6 0v5" />
+               <path d="M10 12v6" />
+               <path d="M14 12v6" />
+               <rect x="5" y="12" width="14" height="8" rx="1" />
+             </svg>
+             Hapus akun
+           </button>
+           <button
+             type="button"
+             role="menuitem"
+             data-testid="user-menu-logout"
+             onClick={() => {
+               setOpen(false);
+               onLogout();
+             }}
+             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
+           >
+             <svg
+               width="16"
+               height="16"
+               viewBox="0 0 24 24"
+               fill="none"
+               stroke="currentColor"
+               strokeWidth="1.8"
+               strokeLinecap="round"
+               strokeLinejoin="round"
+               aria-hidden="true"
+             >
+               <path d="M9 18l6-6-6-6" />
+               <path d="M15 12H4" />
+               <path d="M5 5V3" />
+               <circle cx="18" cy="18" r="3" />
+             </svg>
+             Keluar
+           </button>
+         </div>
       )}
 
       {showDeleteDialog && (
