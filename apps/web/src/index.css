@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #0a0a0a;
+  color: #fafafa;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+@layer components {
+  .key-button {
+    display: flex;
+    height: 3.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    background-color: #171717;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: #fafafa;
+    box-shadow: 0 2px 0 0 #000;
+    transition: background-color 120ms ease;
+  }
+  .key-button:hover {
+    background-color: #262626;
+  }
+  .key-button:active {
+    box-shadow: none;
+    transform: translateY(1px);
+  }
+  .key-button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}

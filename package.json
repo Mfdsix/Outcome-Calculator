@@ -1,0 +1,28 @@
+{
+  "name": "expense-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Daily Expense Calculator — capture and review expenses with the speed and simplicity of a calculator.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @expense-app/api & npm run dev --workspace @expense-app/web & wait",
+    "dev:api": "npm run dev --workspace @expense-app/api",
+    "dev:web": "npm run dev --workspace @expense-app/web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:push": "npm run db:push --workspace @expense-app/api",
+    "db:seed": "npm run db:seed --workspace @expense-app/api",
+    "db:studio": "npm run db:studio --workspace @expense-app/api"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

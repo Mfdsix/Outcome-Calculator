@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// HMAC(APP_JWT_SECRET, "pin-lookup" || pin) — used to FIND the user, never the PIN itself.
+  pinLookup String   @unique @map("pin_lookup")
+  /// scrypt hash — used to VERIFY the PIN. The raw PIN is never stored.
+  pinHash   String   @map("pin_hash")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  expenses Expense[]
+
+  @@map("users")
+}
+
+model Expense {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount     BigInt   @db.BigInt
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Owned by exactly one PIN identity. Migrations are two-push:
+  /// push-1 adds this column optional, legacy rows are adopted
+  /// (prisma/adopt.ts), push-2 makes it required.
+  userId String  @map("user_id") @db.Uuid
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@map("expenses")
+}
