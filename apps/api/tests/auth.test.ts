@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { SESSION_TTL_MS } from "@expense-app/shared";
 
+import { prisma } from "../src/prisma.js";
+import { _resetLoginRateLimitForTests } from "../src/auth.js";
 import {
   getApp,
   getAccessToken,
@@ -19,6 +21,7 @@ import {
 
 const PIN_A = "AAA111";
 const PIN_B = "BBB222";
+const PIN_DEL = "DEL333";
 
 let app: FastifyInstance;
 
@@ -250,5 +253,156 @@ describe("login rate limit", () => {
     }
     expect(saw429).toBe(true);
     expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/auth/deactivate", () => {
+  // The 429 test above exhausts the per-IP login bucket for 5 minutes;
+  // deactivate tests log in, so clear the buckets before each.
+  beforeEach(() => {
+    _resetLoginRateLimitForTests();
+  });
+
+  it("deactivates: old token 401 everywhere, row tombstoned, expenses kept", async () => {
+    const token = await getAccessToken(app, PIN_DEL);
+    const userId = userIdFromToken(app, token);
+    await resetExpenses(userId);
+    await seedRows(userId, [
+      { amount: 12000, occurredAt: new Date("2026-09-17T00:30:00+07:00") },
+      { amount: 8000, occurredAt: new Date("2026-09-17T20:00:00+07:00") },
+    ]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/deactivate",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { pin: PIN_DEL },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true });
+
+    // Row: tombstoned lookup + inactive flag, still present.
+    const row = await prisma.user.findUnique({ where: { id: userId } });
+    expect(row).not.toBeNull();
+    expect(row!.isActive).toBe(false);
+    expect(row!.pinLookup).toBe(`inactive:${userId}`);
+
+    // Old token is dead on every authenticated route, including refresh.
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(list.statusCode).toBe(401);
+
+    const refresh = await app.inject({
+      method: "POST",
+      url: "/api/auth/refresh",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(refresh.statusCode).toBe(401);
+
+    // Expenses stay attached to the old (inactive) user id.
+    const kept = await prisma.expense.count({ where: { userId } });
+    expect(kept).toBe(2);
+
+    await resetExpenses(userId);
+  });
+
+  it("rejects a wrong PIN with 401 and keeps the user active + token valid", async () => {
+    const token = await getAccessToken(app, PIN_DEL);
+    const userId = userIdFromToken(app, token);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/deactivate",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { pin: "ZZZ999" },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "PIN salah." });
+
+    const row = await prisma.user.findUnique({ where: { id: userId } });
+    expect(row!.isActive).toBe(true);
+    expect(row!.pinLookup).not.toContain("inactive:");
+
+    // Token still works after the failed attempt.
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(list.statusCode).toBe(200);
+  });
+
+  it("requires a token → 401", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/deactivate",
+      payload: { pin: PIN_DEL },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects a malformed PIN with 400", async () => {
+    const token = await getAccessToken(app, PIN_DEL);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/deactivate",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { pin: "ABC" },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("frees the PIN: reuse takes the 202→confirm path into a fresh empty space", async () => {
+    const oldToken = await getAccessToken(app, PIN_DEL);
+    const oldUserId = userIdFromToken(app, oldToken);
+    await resetExpenses(oldUserId);
+    await seedRows(oldUserId, [{ amount: 5000, occurredAt: new Date("2026-09-17T10:00:00+07:00") }]);
+
+    const deactivate = await app.inject({
+      method: "POST",
+      url: "/api/auth/deactivate",
+      headers: { authorization: `Bearer ${oldToken}` },
+      payload: { pin: PIN_DEL },
+    });
+    expect(deactivate.statusCode).toBe(200);
+
+    // Same PIN again: unknown → needsConfirm (the tombstoned row is invisible).
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { pin: PIN_DEL },
+    });
+    expect(first.statusCode).toBe(202);
+    expect(first.json()).toEqual({ needsConfirm: true });
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { pin: PIN_DEL, confirm: true },
+    });
+    expect(second.statusCode).toBe(200);
+    const newToken = (second.json() as { token: string }).token;
+    const newUserId = userIdFromToken(app, newToken);
+    expect(newUserId).not.toBe(oldUserId);
+
+    // Fresh space: no expenses carried over.
+    const list = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: { authorization: `Bearer ${newToken}` },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().expenses).toHaveLength(0);
+
+    // Old row untouched: inactive, old expenses still attached.
+    const oldRow = await prisma.user.findUnique({ where: { id: oldUserId } });
+    expect(oldRow!.isActive).toBe(false);
+    expect(await prisma.expense.count({ where: { userId: oldUserId } })).toBe(1);
+
+    await resetExpenses(oldUserId);
+    await resetExpenses(newUserId);
   });
 });

@@ -25,6 +25,11 @@ export const loginRequestSchema = z.object({
   confirm: z.boolean().optional(),
 });
 
+/** Deactivate request body: { pin } — same PIN format as login. */
+export const deactivateRequestSchema = z.object({
+  pin: pinSchema,
+});
+
 export function normalizePin(pin: string): string {
   return pin.trim().toUpperCase();
 }

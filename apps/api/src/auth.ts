@@ -1,7 +1,12 @@
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
-import { SESSION_TTL_MS, loginRequestSchema, normalizePin } from "@expense-app/shared";
+import {
+  SESSION_TTL_MS,
+  deactivateRequestSchema,
+  loginRequestSchema,
+  normalizePin,
+} from "@expense-app/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { loadEnv } from "./env.js";
@@ -158,6 +163,11 @@ export function loginRateLimit(
   return { allowed: true, retryAfterSeconds: 0 };
 }
 
+/** Test-only: clear the in-memory per-IP login buckets (bucket map is module state). */
+export function _resetLoginRateLimitForTests(): void {
+  loginBuckets.clear();
+}
+
 /** Provision a new user for a PIN. Caller has already validated the PIN format. */
 async function provisionUser(secret: string, pin: string) {
   const pinHash = await hashPin(pin);
@@ -184,9 +194,13 @@ export function registerAuth(app: FastifyInstance, jwtSecret: string): void {
       return reply.status(401).send({ error: "Unauthorized." });
     }
 
-    // The subject must be a real user (token was signed by us, but the user
-    // could have been deleted since).
-    const user = await prisma.user.findUnique({ where: { id: verified.payload.sub } });
+    // The subject must be a real, ACTIVE user (token was signed by us, but
+    // the user could have been deleted — or deactivated — since). Requiring
+    // isActive makes every token of a just-deactivated user 401 across all
+    // routes including refresh → the client takes its existing re-lock path.
+    const user = await prisma.user.findFirst({
+      where: { id: verified.payload.sub, isActive: true },
+    });
     if (!user) return reply.status(401).send({ error: "Unauthorized." });
 
     request.userId = user.id;
@@ -258,6 +272,50 @@ export function registerAuth(app: FastifyInstance, jwtSecret: string): void {
     const userId = request.userId as string;
     const token = createToken(jwtSecret, userId);
     return reply.send({ token, expiresInMs: TOKEN_TTL_MS });
+  });
+
+  /**
+   * Deactivate (soft delete): verify the caller's PIN, then tombstone the
+   * user row in ONE atomic update — isActive=false and pinLookup rewritten
+   * to "inactive:<id>" (still unique because the id is). The row stays, so
+   * old expenses remain attached to the old identity; the freed PIN takes
+   * the normal 202→confirm login flow and provisions a fresh empty space.
+   * No explicit token revocation: the preHandler's isActive requirement 401s
+   * every existing token immediately. pinHash is intentionally not wiped —
+   * the tombstoned row can never be looked up nor re-provisioned.
+   */
+  app.post("/api/auth/deactivate", async (request, reply) => {
+    // PIN verification is a brute-force surface: same per-IP limiter as login.
+    const rate = loginRateLimit(request.ip);
+    if (!rate.allowed) {
+      return reply
+        .status(429)
+        .header("Retry-After", String(rate.retryAfterSeconds))
+        .send({ error: "Terlalu banyak percobaan. Coba lagi nanti." });
+    }
+
+    const parsed = deactivateRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "PIN must be 6 alphanumeric characters." });
+    }
+
+    const userId = request.userId;
+    if (!userId) return reply.status(401).send({ error: "Unauthorized." });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return reply.status(401).send({ error: "Unauthorized." });
+
+    const pin = normalizePin(parsed.data.pin);
+    if (!(await verifyPin(pin, user.pinHash))) {
+      // Wrong PIN: account stays active, token stays valid, generic 401.
+      return reply.status(401).send({ error: "PIN salah." });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive: false, pinLookup: `inactive:${user.id}` },
+    });
+
+    return reply.send({ ok: true });
   });
 }
 

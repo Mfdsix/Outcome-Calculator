@@ -1,0 +1,33 @@
+# Root .dockerignore — keeps build contexts lean for both API and web images.
+node_modules
+packages/*/node_modules
+apps/*/node_modules
+
+# Build outputs
+dist
+**/dist
+coverage
+.nyc_output
+
+# Env files (secrets) — never baked into images.
+.env
+.env.*
+apps/api/.env
+apps/api/.env.*
+apps/web/.env
+apps/web/.env.*
+
+# SCM / editor
+.git
+.gitignore
+.github
+.hg
+.DS_Store
+*.suo
+*.swp
+.vscode
+.idea
+
+# CI artifacts
+*.log
+*.tsbuildinfo

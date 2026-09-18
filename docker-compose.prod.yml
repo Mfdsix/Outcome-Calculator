@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: expense-app-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: expense
+      POSTGRES_PASSWORD: expense
+      POSTGRES_DB: expense
+    # Not published — reachable only by sibling containers via the internal network.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U expense -d expense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: expense-app-api
+    restart: unless-stopped
+    env_file:
+      - apps/api/.env
+    environment:
+      # Compose-internal address; overrides any localhost URL baked into apps/api/.env.
+      DATABASE_URL: postgresql://expense:expense@postgres:5432/expense
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # API is internal-only — not published to the host.
+    expose:
+      - "3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ""
+    container_name: expense-app-web
+    restart: unless-stopped
+    ports:
+      - "6600:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:

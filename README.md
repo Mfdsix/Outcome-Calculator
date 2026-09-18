@@ -101,6 +101,15 @@ identity — no email, no username.
   Tokens are non-rotating — old ones stay valid until their own exp.
 - Rate limit: login is limited to 20 attempts / 5 min per IP → `429` with
   `Retry-After` (in-memory; resets on restart).
+- **Deactivate (soft delete)** `POST /api/auth/deactivate { pin }` (Bearer
+  required): verifies the PIN, then marks the user row `is_active = false`
+  and tombstones `pin_lookup` to `inactive:<userId>` in one update. The row
+  stays, so old expenses remain attached to the old identity; the freed PIN
+  takes the normal 202→confirm login flow into a fresh empty space. Existing
+  tokens 401 immediately (all authenticated routes require an active user) →
+  the client re-locks. Wrong PIN → `401 "PIN salah."`, account stays active.
+  Honest notes: reactivation is not supported; a re-seeded `SEED_PIN` after
+  deactivation provisions a new user (seed matches active rows only).
 - Data is scoped per user: all expense queries filter by the token's user;
   cross-user ids resolve to `404`.
 
@@ -128,6 +137,14 @@ One-time, in this order:
 4. Deploy → every device re-logins with its PIN once (old tokens are dead:
    `APP_ACCESS_CODE` is gone).
 
+## Deactivate: schema note
+
+`User.isActive` (`is_active`, default `true`) is a **single, non-breaking
+`db push`** — no two-push/adopt dance needed. Deactivation rewrites
+`pin_lookup` to `inactive:<userId>` so the `@unique` constraint (partial
+indexes are not expressible in the Prisma schema) is satisfied while freeing
+the PIN for reuse.
+
 ## Session refresh (client)
 
 On mount and when the tab becomes visible, the client refreshes the token if
@@ -138,8 +155,10 @@ retry on the next visit. `expense-app.last-visit` in localStorage tracks it.
 ## Profile menu
 
 The navbar has a trailing user icon (both calculator and browse modes):
-masked PIN `••••••` + **Keluar**. Logout clears the token and returns to the
-lock screen = switching identity.
+masked PIN `••••••`, **Keluar**, and **Hapus akun** (red, requires retyping
+the 6-char PIN to confirm). Logout clears the token and returns to the lock
+screen = switching identity. Deactivation also clears the token and locks —
+the same PIN can then start over with an empty history.
 
 Amounts are integer IDR (BIGINT in Postgres, `amount > 0` check constraint).
 Day/Week/Month boundaries are computed in `Asia/Jakarta` (`APP_TIMEZONE`), never

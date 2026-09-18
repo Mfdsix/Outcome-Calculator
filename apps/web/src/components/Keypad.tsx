@@ -4,16 +4,12 @@ const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
 export interface KeypadProps {
   onDigit: (digit: string) => void;
-  onBackspace: () => void;
+   onBackspace: () => void;
   onEnter: () => void;
   enterDisabled: boolean;
   disabled?: boolean;
-  /** Calculator mode: when editing, the backspace slot becomes a red delete
-   * button that requests deletion of the edited transaction. */
-  isEditing?: boolean;
-   onDeleteRequest?: () => void;
-   /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
-    * navDisabled (special mode only) dims + disables individual directions. */
+  /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
+   * navDisabled (special mode only) dims + disables individual directions. */
   layout?: "calc" | "special";
   onNavigate?: (direction: "up" | "down" | "left" | "right") => void;
   navDisabled?: Partial<Record<"up" | "down" | "left" | "right", boolean>>;
@@ -32,8 +28,6 @@ export function Keypad({
   onEnter,
   enterDisabled,
   disabled,
-  isEditing,
-  onDeleteRequest,
   layout = "calc",
   onNavigate,
   navDisabled,
@@ -131,16 +125,10 @@ export function Keypad({
       <button
         type="button"
         data-testid="key-backspace"
-        aria-label={isSpecial ? "Backspace" : isEditing ? "Delete expense" : "Backspace"}
-        disabled={isSpecial ? true : isEditing ? false : disabled}
-        onClick={() =>
-          isSpecial
-            ? undefined
-            : isEditing
-              ? onDeleteRequest?.()
-              : onBackspace()
-        }
-        className={`key-button ${isEditing && !isSpecial ? "text-red-400" : "text-neutral-300"} disabled:opacity-40`}
+        aria-label="Backspace"
+        disabled={isSpecial ? true : disabled}
+        onClick={() => onBackspace()}
+        className="key-button text-neutral-300 disabled:opacity-40"
       >
         ⌫
       </button>

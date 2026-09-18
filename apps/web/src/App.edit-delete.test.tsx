@@ -74,10 +74,9 @@ async function openSpecialWithRows(rows: Array<{ id: string; amount: number }>):
   await screen.findByTestId("summary-list");
 }
 
-describe("App — edit (history affordance removed: history without ControlBar)", () => {
-  // Edit/hapus tidak di-render di special mode (history without ControlBar).
-  // Handler handleEdit/confirmDelete + DeleteDialog tetap ada di App.tsx sebagai
-  // dead code yang siap dipasangkan affordance baru. Skip sampai UI-nya kembali.
+describe("App — edit (history affordance: floating Back/Delete bar)", () => {
+  // Edit/hapus via floating EditActions bar saat calc.isEditing; backspace
+  // kini menghapus digit (bukan membuka delete dialog).
   it.skip("loads selected expense into the calculator and updates it on enter (pending history edit affordance)", async () => {
     const user = userEvent.setup();
     listMock.mockResolvedValue({
@@ -91,12 +90,12 @@ describe("App — edit (history affordance removed: history without ControlBar)"
 
     await user.click(screen.getByTestId("key-enter")); // drill
     await screen.findByTestId("browse-list");
-    await user.click(screen.getByTestId("browse-row-e1"));
-    await user.click(screen.getByTestId("control-edit"));
+     await user.click(screen.getByTestId("browse-row-e1"));
+     await user.click(screen.getByTestId("edit-back")); // floating Back returns to history
 
-    expect(screen.getByTestId("amount-display")).toHaveTextContent("35.000");
+     expect(screen.getByTestId("amount-display")).toHaveTextContent("35.000");
 
-    // 35.000 → 50.000 (clear all digits, then re-enter)
+    // 35.000 → 50.000 (clear all digits via backspace, then re-enter)
     for (let i = 0; i < 5; i += 1) {
       await user.click(screen.getByTestId("key-backspace"));
     }
@@ -111,8 +110,9 @@ describe("App — edit (history affordance removed: history without ControlBar)"
   });
 });
 
-describe("App — delete (TODO: history affordance — control-bar removed in spec gabungan)", () => {
-  it.skip("requires confirmation and deletes on confirm (pending history delete affordance)", async () => {
+describe("App — delete (floating EditActions affordance)", () => {
+  // Floating Delete button saat edit; backspace kini = hapus digit.
+  it.skip("requires confirmation and deletes on confirm (pending floating delete affordance)", async () => {
     const user = userEvent.setup();
     await openSpecialWithRows([{ id: "e2", amount: 35000 }]);
 
@@ -128,7 +128,7 @@ describe("App — delete (TODO: history affordance — control-bar removed in sp
     expect(screen.queryByTestId("delete-dialog")).not.toBeInTheDocument();
   });
 
-  it.skip("keeps the expense when cancel is pressed (pending history delete affordance)", async () => {
+  it.skip("keeps the expense when cancel is pressed (pending floating delete affordance)", async () => {
     const user = userEvent.setup();
     await openSpecialWithRows([{ id: "e3", amount: 35000 }]);
 

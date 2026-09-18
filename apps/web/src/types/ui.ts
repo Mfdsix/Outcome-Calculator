@@ -12,3 +12,11 @@ export type ViewMode = "calculator" | "special";
 
 /** Where the special browse list currently is. */
 export type SpecialPanel = "summary" | "drill";
+
+/** Snapshot of history state captured on edit, so Back can restore it. */
+export interface EditOrigin {
+  period: Period;
+  panel: SpecialPanel;
+  drillDayKey: string | null;
+  selectedKey: string | null;
+}

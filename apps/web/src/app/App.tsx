@@ -6,12 +6,14 @@ import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
 import { DeleteDialog } from "../components/DeleteDialog";
+import { EditActions } from "../components/EditActions";
 import { Header } from "../components/Header";
 import { Keypad } from "../components/Keypad";
 import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { LockScreen } from "../components/LockScreen";
 import { SummaryList } from "../components/SummaryList";
+import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UserMenu } from "../components/UserMenu";
 import { useCalculator } from "../hooks/useCalculator";
@@ -26,7 +28,7 @@ import {
 import { dailyBuckets, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
-import type { Period } from "../types/ui";
+import type { EditOrigin, Period } from "../types/ui";
 
 const LAST_VISIT_KEY = "expense-app.last-visit";
 
@@ -243,6 +245,8 @@ function AppBody({ logout }: { logout: () => void }) {
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
+  const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
+  const [showUnsaved, setShowUnsaved] = useState(false);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -288,8 +292,41 @@ function AppBody({ logout }: { logout: () => void }) {
   }
   const transactionKey = transactionKeyRef.current;
 
+  const clearEditOrigin = useCallback(() => setEditOrigin(null), []);
+
+  /** Restore history state captured in editOrigin (period + panel + selection). */
+  const restoreHistory = useCallback(
+    (origin: EditOrigin | null) => {
+      if (!origin) return;
+      openHistory(origin.period);
+      if (origin.panel === "drill" && origin.drillDayKey) {
+        setDrillDayKey(origin.drillDayKey);
+        enterDrill();
+      }
+      setSelectedKey(origin.selectedKey);
+    },
+    [openHistory, enterDrill, setSelectedKey],
+  );
+
+  const handleEditBack = useCallback(() => {
+    const original =
+      calc.editingId !== null ? expenses.find((item) => item.id === calc.editingId) : undefined;
+    const dirty =
+      calc.isEditing &&
+      calc.editingId !== null &&
+      original !== undefined &&
+      calc.amount !== original.amount;
+    if (dirty) {
+      setShowUnsaved(true);
+      return;
+    }
+    calc.clear();
+    restoreHistory(editOrigin);
+    clearEditOrigin();
+  }, [calc, expenses, editOrigin, restoreHistory, clearEditOrigin]);
+
   /** Commit a pending edit: optimistic update + API call + flash/error.
-   *  Extracted so handleEnter and UpdateDialog confirm share one path. */
+   * Extracted so handleEnter and UpdateDialog confirm share one path. */
   const commitUpdate = useCallback(
     async (id: string, amount: number) => {
       const previous = expenses.find((item) => item.id === id);
@@ -300,6 +337,9 @@ function AppBody({ logout }: { logout: () => void }) {
         const saved = await expensesApi.update(id, { amount });
         applyOptimisticUpdate(saved);
         doFlash();
+        calc.clear();
+        restoreHistory(editOrigin);
+        clearEditOrigin();
       } catch (cause) {
         if (previous) applyOptimisticUpdate(previous);
         if (cause instanceof UnauthorizedError) {
@@ -309,7 +349,7 @@ function AppBody({ logout }: { logout: () => void }) {
         showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
       }
     },
-    [expenses, applyOptimisticUpdate, doFlash, logout, showError],
+    [expenses, applyOptimisticUpdate, doFlash, logout, showError, calc, editOrigin, clearEditOrigin, restoreHistory],
   );
 
   const handleEnter = useCallback(async () => {
@@ -322,6 +362,8 @@ function AppBody({ logout }: { logout: () => void }) {
       if (previous && previous.amount === amount) {
         // No change — dismiss edit silently.
         calc.clear();
+        clearEditOrigin();
+        restoreHistory(editOrigin);
         return;
       }
       if (previous && previous.amount !== amount) {
@@ -352,7 +394,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError]);
+  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError, editOrigin, clearEditOrigin, restoreHistory]);
 
   // --- Special-mode data -------------------------------------------------------
 
@@ -394,33 +436,24 @@ function AppBody({ logout }: { logout: () => void }) {
       if (direction === "up" || direction === "down") {
         next = direction === "up" ? Math.max(0, valid - 1) : Math.min(expenses.length - 1, valid + 1);
       } else {
-        // left/right = page jump of ±5 in transaction lists too.
-        next = Math.min(expenses.length - 1, Math.max(0, valid + (direction === "right" ? 5 : -5)));
+        next = Math.min(expenses.length - 1, Math.max(0, valid + 1));
       }
       setSelectedKey(expenses[next]?.id ?? null);
     },
-    [expenses, selectedKey, setSelectedKey],
+     [expenses, selectedKey, setSelectedKey],
   );
-
-  const MODE_ORDER: Period[] = ["day", "week", "month"];
 
   const handleNavigate = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
       switch (direction) {
         case "left": {
-          if (period === "day") return;
-          const order: Period[] = ["day", "week", "month"];
-          const idx = order.indexOf(period);
-          if (idx <= 0) return;
-          openHistory(order[idx - 1]);
+          if (period === "day" && !inDrill) return;
+          openHistory(period === "week" ? "day" : "week");
           return;
         }
         case "right": {
-          if (period === "month") return;
-          const order: Period[] = ["day", "week", "month"];
-          const idx = order.indexOf(period);
-          if (idx >= order.length - 1) return;
-          openHistory(order[idx + 1]);
+          if (period === "month" && !inDrill) return;
+          openHistory(period === "week" ? "month" : "week");
           return;
         }
         case "up":
@@ -453,7 +486,12 @@ function AppBody({ logout }: { logout: () => void }) {
         : chartBuckets.map((b) => b.key);
 
     if (domainKeys.length === 0) {
-      return { up: true, down: true, left: period === "day", right: period === "month" };
+      return {
+        up: true,
+        down: true,
+        left: period === "day" && !inDrill,
+        right: period === "month" && !inDrill,
+      };
     }
     const idx = domainKeys.indexOf(selectedKey ?? "");
     const valid = idx < 0 ? 0 : idx;
@@ -462,8 +500,8 @@ function AppBody({ logout }: { logout: () => void }) {
     return {
       up: valid === 0,
       down: valid === last,
-      left: period === "day",
-      right: period === "month",
+      left: period === "day" && !inDrill,
+      right: period === "month" && !inDrill,
     };
   }, [inDrill, period, expenses, chartBuckets, selectedKey]);
 
@@ -471,9 +509,10 @@ function AppBody({ logout }: { logout: () => void }) {
     const id = inDrill ? transactionKey : selectedKey;
     const expense = expenses.find((item) => item.id === id);
     if (!expense) return;
-    calc.startEdit(expense.id, expense.amount);
-    closeHistory();
-  }, [calc, expenses, inDrill, selectedKey, closeHistory, transactionKey]);
+     setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
+     calc.startEdit(expense.id, expense.amount);
+     closeHistory();
+   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
 
   const handleSpecialEnter = useCallback(() => {
     // Drill / day-summary: Enter edits the selected transaction directly.
@@ -490,16 +529,6 @@ function AppBody({ logout }: { logout: () => void }) {
     }
   }, [chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey]);
 
-  /**
-   * Request to delete the currently edited transaction (backspace-in-edit-mode
-   * path). If no transaction is being edited, no-op.
-   */
-  const handleDeleteRequest = useCallback(() => {
-    const id = calc.editingId;
-    if (!id) return;
-    setDeleteTarget(id);
-  }, [calc.editingId]);
-
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
     if (!id) return;
@@ -512,6 +541,8 @@ function AppBody({ logout }: { logout: () => void }) {
     applyOptimisticDelete(id);
     try {
       await expensesApi.remove(id);
+      restoreHistory(editOrigin);
+      clearEditOrigin();
     } catch (cause) {
       if (expense) applyOptimisticCreate(expense);
       if (cause instanceof UnauthorizedError) {
@@ -520,7 +551,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [applyOptimisticCreate, applyOptimisticDelete, calc, deleteTarget, expenses, logout, showError]);
+  }, [applyOptimisticCreate, applyOptimisticDelete, calc, deleteTarget, expenses, logout, showError, editOrigin, clearEditOrigin, restoreHistory]);
 
   const confirmUpdate = useCallback(async () => {
     const pending = pendingUpdate;
@@ -538,25 +569,25 @@ function AppBody({ logout }: { logout: () => void }) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
 
-      if (event.key === "Escape") {
-        if (deleteTarget) {
-          setDeleteTarget(null);
-          return;
-        }
-        if (pendingUpdate) {
-          setPendingUpdate(null);
-          return;
-        }
-        if (calc.isEditing) {
-          calc.clear();
-          return;
-        }
-        if (isSpecial && inDrill) exitDrill();
-        else if (isSpecial) closeHistory();
-        return;
-      }
+       if (event.key === "Escape") {
+         if (showUnsaved) {
+           setShowUnsaved(false);
+           return;
+         }
+         if (deleteTarget) {
+           setDeleteTarget(null);
+           return;
+         }
+         if (pendingUpdate) {
+           setPendingUpdate(null);
+           return;
+         }
+         if (isSpecial && inDrill) exitDrill();
+         else if (isSpecial) closeHistory();
+         return;
+       }
 
-      if (deleteTarget || pendingUpdate) return; // modal decision pending — ignore other keys
+      if (showUnsaved || deleteTarget || pendingUpdate) return; // modal decision pending — ignore other keys
 
       if (isSpecial) {
         if (event.key === "ArrowUp") {
@@ -579,12 +610,8 @@ function AppBody({ logout }: { logout: () => void }) {
       }
 
       if (calc.isEditing) {
-        // In edit mode digits still append. Backspace removes the edited item.
-        if (event.key === "Backspace") {
-          event.preventDefault();
-          handleDeleteRequest();
-          return;
-        }
+        // Edit mode: Backspace corrects the input (handled below). Other keys
+        // fall through; no delete-on-backspace anymore.
       }
 
       if (/^[0-9]$/.test(event.key)) {
@@ -602,6 +629,7 @@ function AppBody({ logout }: { logout: () => void }) {
     return () => window.removeEventListener("keydown", handler);
   }, [
     deleteTarget,
+    showUnsaved,
     calc,
     isSpecial,
     inDrill,
@@ -684,11 +712,11 @@ function AppBody({ logout }: { logout: () => void }) {
   })();
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
+    <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
       <Header
         periodLabel={periodLabel}
         totalLabel={totalLabel}
-        trailing={<UserMenu onLogout={logout} />}
+        trailing={<UserMenu onLogout={logout} onAccountDeleted={logout} />}
       />
 
       {banner && (
@@ -763,21 +791,33 @@ function AppBody({ logout }: { logout: () => void }) {
             onDigit={calc.pressDigit}
             onBackspace={calc.pressBackspace}
             onEnter={() => void handleEnter()}
-             enterDisabled={
-               calc.amount <= 0 ||
-               Boolean(
-                 calc.isEditing &&
-                 calc.editingId &&
-                 expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
-               )
-             }
-            isEditing={calc.isEditing}
-            onDeleteRequest={() => setDeleteTarget(calc.editingId)}
-          />
-        </>
-      )}
+            enterDisabled={
+              calc.amount <= 0 ||
+              Boolean(
+                calc.isEditing &&
+                calc.editingId &&
+                expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
+              )
+            }
+            />
+          </>
+        )}
 
-      {deleteTarget && (
+        {calc.isEditing && !isSpecial && (
+          <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
+        )}
+
+        {showUnsaved && (
+          <UnsavedDialog
+            onSave={() => {
+              setShowUnsaved(false);
+              void handleEnter();
+            }}
+            onCancel={handleEditBack}
+          />
+        )}
+
+        {deleteTarget && (
         <DeleteDialog
           amountLabel={deleteLabel}
           busy={false}

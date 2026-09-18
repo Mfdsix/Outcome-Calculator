@@ -178,6 +178,18 @@ export const authApi = {
     writeLastVisit();
     return response;
   },
+
+  /**
+   * Deactivate this account (soft delete). Verifies the PIN server-side:
+   * 401 → wrong PIN (ApiError, dialog stays open); on success the token
+   * becomes invalid immediately — the caller clears it and re-locks.
+   */
+  async deactivate(pin: string): Promise<void> {
+    await request<{ ok: boolean }>("/api/auth/deactivate", {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    });
+  },
 };
 
 export const expensesApi = {

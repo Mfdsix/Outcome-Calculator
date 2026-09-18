@@ -93,13 +93,16 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
     }
 
     try {
-      const row = await prisma.expense.update({
-        where: { id },
+      // Scoped update (like DELETE below): a foreign id updates nothing —
+      // never mutate first and check ownership afterwards.
+      const updated = await prisma.expense.updateMany({
+        where: { id, userId },
         data: { amount: BigInt(parsed.data.amount) },
       });
-      if (row.userId !== userId) {
+      if (updated.count === 0) {
         return reply.status(404).send({ error: "Expense not found." });
       }
+      const row = await prisma.expense.findUniqueOrThrow({ where: { id } });
       return reply.send(toExpenseDto(row, appTimezone));
     } catch {
       return reply.status(404).send({ error: "Expense not found." });

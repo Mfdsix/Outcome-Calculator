@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
+import { DeleteAccountDialog } from "./DeleteAccountDialog";
+import { ApiError, authApi } from "../lib/api";
+
 export interface UserMenuProps {
   /** Called after the auth token is cleared and the app must re-lock. */
   onLogout: () => void;
+  /** Called after account deactivation succeeds (token cleared, re-lock). */
+  onAccountDeleted: () => void;
 }
 
 /**
  * Profile entry point (plan §3): user icon in the navbar's trailing slot.
- * Shows the masked PIN (never the raw passcode) and the logout item.
- * Closes via tap-outside, Escape, or after logout.
+ * Shows the masked PIN (never the raw passcode), the logout item, and the
+ * destructive "Hapus akun" item (red, below a second divider) which opens a
+ * PIN-confirmation dialog owned by this component. Closes via tap-outside,
+ * Escape, or after logout/deletion.
  */
-export function UserMenu({ onLogout }: UserMenuProps) {
+export function UserMenu({ onLogout, onAccountDeleted }: UserMenuProps) {
   const [open, setOpen] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,6 +43,33 @@ export function UserMenu({ onLogout }: UserMenuProps) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
+
+  const confirmDeleteAccount = async (pin: string): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setDialogError(null);
+    try {
+      await authApi.deactivate(pin);
+      // Success: close everything, let App clear the token and re-lock.
+      setShowDeleteDialog(false);
+      setOpen(false);
+      onAccountDeleted();
+    } catch (cause) {
+      // 401 wrong PIN → "PIN salah."; 429 → rate-limit copy; network →
+      // generic. The dialog stays open either way.
+      setDialogError(
+        cause instanceof ApiError && cause.status === 429
+          ? "Terlalu banyak percobaan. Coba lagi nanti."
+          : cause instanceof ApiError && cause.status === 0
+            ? "Tidak ada koneksi. Coba lagi."
+            : cause instanceof Error
+              ? cause.message
+              : "Gagal menghapus akun. Coba lagi.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="relative" ref={containerRef}>
@@ -88,7 +125,30 @@ export function UserMenu({ onLogout }: UserMenuProps) {
           >
             Keluar
           </button>
+          <div className="mx-3 border-t border-neutral-800" />
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-delete-account"
+            onClick={() => {
+              setOpen(false);
+              setDialogError(null);
+              setShowDeleteDialog(true);
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
+          >
+            Hapus akun
+          </button>
         </div>
+      )}
+
+      {showDeleteDialog && (
+        <DeleteAccountDialog
+          busy={busy}
+          error={dialogError}
+          onCancel={() => setShowDeleteDialog(false)}
+          onConfirm={(pin) => void confirmDeleteAccount(pin)}
+        />
       )}
     </div>
   );

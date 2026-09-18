@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getZonedParts, last30DaysRange, last7DaysRange } from "@expense-app/shared";
 
 import App from "./app/App";
-import { authApi, expensesApi, UnauthorizedError } from "./lib/api";
+import { authApi, expensesApi, ApiError, setAuthToken, UnauthorizedError } from "./lib/api";
 
 vi.mock("./lib/api", () => {
   const list = vi.fn();
@@ -14,12 +14,13 @@ vi.mock("./lib/api", () => {
   const remove = vi.fn();
   const login = vi.fn();
   const refresh = vi.fn();
+  const deactivate = vi.fn();
   const readLastVisit = vi.fn(() => 0);
   const writeLastVisit = vi.fn();
   const setAuthToken = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
-    authApi: { login, refresh },
+    authApi: { login, refresh, deactivate },
     ApiError: class ApiError extends Error {
       status: number;
       constructor(status: number, message: string) {
@@ -38,11 +39,13 @@ const listMock = vi.mocked(expensesApi.list);
 const createMock = vi.mocked(expensesApi.create);
 const loginMock = vi.mocked(authApi.login);
 const refreshMock = vi.mocked(authApi.refresh);
+const deactivateMock = vi.mocked(authApi.deactivate);
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   listMock.mockResolvedValue({ expenses: [], total: 0 });
+  deactivateMock.mockResolvedValue(undefined);
   createMock.mockImplementation((payload) =>
     Promise.resolve({
       id: `created-${payload.amount}`,
@@ -438,6 +441,121 @@ describe("App — user menu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("user-menu")).not.toBeInTheDocument();
   });
+
+  it("opens the delete-account dialog from the menu item", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+
+    expect(await screen.findByTestId("delete-account-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("delete-account-message")).toHaveTextContent(
+      "Hapus akun? Riwayat tetap tersimpan. PIN ini bisa dipakai lagi dari awal.",
+    );
+    expect(deactivateMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the confirm button disabled until 6 valid PIN characters are typed", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    const confirm = screen.getByTestId("delete-account-confirm");
+    expect(confirm).toBeDisabled();
+
+    await user.type(screen.getByTestId("delete-account-pin"), "ABC");
+    expect(confirm).toBeDisabled();
+
+    await user.type(screen.getByTestId("delete-account-pin"), "123");
+    expect(confirm).toBeEnabled();
+  });
+
+  it("filters the PIN input to uppercase alphanumerics (max 6)", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    const pinInput = screen.getByTestId("delete-account-pin");
+    await user.type(pinInput, "ab!cd@12ef");
+    expect(pinInput).toHaveValue("ABCD12");
+  });
+
+  it("shows 'PIN salah.' and keeps the dialog open on 401", async () => {
+    deactivateMock.mockRejectedValue(
+      new ApiError(401, "PIN salah."),
+    );
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    await user.type(screen.getByTestId("delete-account-pin"), "WRONG9");
+    await user.click(screen.getByTestId("delete-account-confirm"));
+
+    expect(await screen.findByTestId("delete-account-error")).toHaveTextContent("PIN salah.");
+    expect(screen.getByTestId("delete-account-dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("lock-screen")).not.toBeInTheDocument();
+  });
+
+  it("shows rate-limit copy on 429 and keeps the dialog open", async () => {
+    deactivateMock.mockRejectedValue(
+      new ApiError(429, "Terlalu banyak percobaan. Coba lagi nanti."),
+    );
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    await user.type(screen.getByTestId("delete-account-pin"), "ABC123");
+    await user.click(screen.getByTestId("delete-account-confirm"));
+
+    expect(await screen.findByTestId("delete-account-error")).toHaveTextContent(
+      "Terlalu banyak percobaan. Coba lagi nanti.",
+    );
+    expect(screen.getByTestId("delete-account-dialog")).toBeInTheDocument();
+  });
+
+  it("on success: deactivates, clears the token and locks", async () => {
+    const setAuthTokenMock = vi.mocked(setAuthToken);
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    await user.type(screen.getByTestId("delete-account-pin"), "ABC123");
+    await user.click(screen.getByTestId("delete-account-confirm"));
+
+    expect(deactivateMock).toHaveBeenCalledWith("ABC123");
+    expect(await screen.findByTestId("lock-screen")).toBeInTheDocument();
+    expect(setAuthTokenMock).toHaveBeenCalledWith(null);
+  });
+
+  it("cancels the dialog without calling the API", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-delete-account"));
+    await screen.findByTestId("delete-account-dialog");
+
+    await user.click(screen.getByTestId("delete-account-cancel"));
+    expect(screen.queryByTestId("delete-account-dialog")).not.toBeInTheDocument();
+    expect(deactivateMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("keypad")).toBeInTheDocument(); // still unlocked
+  });
 });
 
 describe("App — API error", () => {
@@ -500,5 +618,118 @@ describe("App — layout + special wiring", () => {
     const root = document.querySelector(".max-w-md");
     expect(root).toHaveClass("h-dvh");
     expect(root).toHaveClass("overflow-hidden");
+  });
+});
+
+describe("App — history navigation matrix", () => {
+  async function seed(dayRows: Array<{ id: string; amount: number }>): Promise<void> {
+    listMock.mockResolvedValue({
+      expenses: dayRows.map((r) => ({ ...r, occurredAt: new Date().toISOString() })),
+      total: dayRows.reduce((s, r) => s + r.amount, 0),
+    });
+  }
+
+  it("day left is disabled; day right → week", async () => {
+    const user = userEvent.setup();
+    await seed([{ id: "d0", amount: 1000 }]);
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-day")); // → special D
+    await screen.findByTestId("summary-list");
+    expect(screen.getByTestId("key-4")).toBeDisabled(); // left = day edge
+    expect(screen.getByTestId("key-6")).not.toBeDisabled();
+    await user.click(screen.getByTestId("key-6")); // → W
+    expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
+  });
+
+  it("month right is disabled", async () => {
+    await seed([{ id: "m0", amount: 1000 }]);
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-month")); // → special M
+    await screen.findByTestId("summary-list");
+    expect(screen.getByTestId("key-6")).toBeDisabled(); // right = month edge
+  });
+
+  it("week left → day, week right → month", async () => {
+    await seed([{ id: "w0", amount: 1000 }]);
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-week")); // → special W
+    await screen.findByTestId("summary-list");
+    expect(screen.getByTestId("key-4")).not.toBeDisabled();
+    expect(screen.getByTestId("key-6")).not.toBeDisabled();
+    await user.click(screen.getByTestId("key-4")); // → D
+    expect(screen.getByTestId("period-day")).toHaveAttribute("aria-current", "true");
+    // back via nav — from day, left disabled; use period tap to reopen week
+    await user.click(screen.getByTestId("period-week"));
+    expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
+    await user.click(screen.getByTestId("key-6")); // → M
+    expect(screen.getByTestId("period-month")).toHaveAttribute("aria-current", "true");
+  });
+
+  it("drill right → exits drill into month summary", async () => {
+    await seed([{ id: "d1", amount: 35000 }]);
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-month")); // → special M
+    await screen.findByTestId("summary-list");
+    await user.click(screen.getByTestId("key-enter")); // drill into bucket
+    await screen.findByTestId("browse-list");
+    expect(screen.getByTestId("browse-list")).toBeInTheDocument();
+    await user.click(screen.getByTestId("key-6")); // right → month summary (exits drill)
+    expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("browse-list")).not.toBeInTheDocument();
+  });
+
+  it("up disabled at first row, down disabled at last row (day list)", async () => {
+    await seed([
+      { id: "a", amount: 1000 },
+      { id: "b", amount: 2000 },
+    ]);
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-day")); // → special D
+    await screen.findByTestId("summary-list");
+    await screen.findByTestId("summary-row-b");
+
+    // First row selected → up disabled.
+    await user.click(screen.getByTestId("summary-row-a"));
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByTestId("key-2")).toBeDisabled();
+    // Down enabled at first row.
+    expect(screen.getByTestId("key-8")).not.toBeDisabled();
+
+    // Last row selected → down disabled.
+    await user.click(screen.getByTestId("summary-row-b"));
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("key-8")).toBeDisabled();
+  });
+
+  it("keyboard ArrowRight in day history switches to week (parity with keypad)", async () => {
+    await seed([{ id: "d0", amount: 1000 }]);
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+    await screen.findByTestId("summary-list");
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
+  });
+});
+
+describe("App — edit floating bar containment", () => {
+  it("edit-actions stays contained inside the calculator column (no viewport overflow)", async () => {
+    listMock.mockResolvedValue({
+      expenses: [{ id: "e1", amount: 35000, occurredAt: new Date().toISOString() }],
+      total: 35000,
+    });
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-day")); // → special D
+    await screen.findByTestId("summary-list");
+     await user.click(screen.getByTestId("summary-row-e1")); // select transaction
+    await user.click(screen.getByTestId("key-enter")); // Enter edits selected tx → edit mode
+    const root = document.querySelector(".max-w-md") as HTMLElement;
+    expect(await screen.findByTestId("edit-actions")).toBeInTheDocument();
+    expect(root).toContainElement(screen.getByTestId("edit-actions"));
   });
 });
