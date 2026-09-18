@@ -40,4 +40,6 @@ EXPOSE 3000
 
 # /app/.env is mounted from apps/api/.env on the VPS (never baked in).
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["node", "dist/server.js"]
+# tsx resolves workspace source (packages/shared → .ts) on the fly; avoids a
+# separate shared build just to produce .js artifacts.
+CMD ["/app/node_modules/.bin/tsx", "dist/server.js"]
