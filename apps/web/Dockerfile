@@ -4,16 +4,15 @@
 
 FROM node:20-alpine AS build
 WORKDIR /app
-
-# Copy root manifests so `npm ci` has the workspace package.json + lockfile.
-COPY package.json package-lock.json* ./
-
-# Install deps for the web workspace (uses root lockfile + workspaces).
-RUN npm ci --workspace @expense-app/web --include-workspace-root
+# npm ci needs the full workspace tree (apps/* + packages/*) plus manifests.
+COPY . .
 
 # Build arg: leave empty for same-origin /api, or set a full URL to bypass nginx.
 ARG VITE_API_URL=""
 ENV VITE_API_URL=${VITE_API_URL}
+
+# Install deps for the web workspace (uses root lockfile + workspaces).
+RUN npm ci --workspace @expense-app/web --include-workspace-root
 
 COPY apps/web ./apps/web
 COPY packages ./packages

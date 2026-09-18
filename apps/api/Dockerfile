@@ -6,8 +6,8 @@
 # --- deps stage: install everything needed to build (incl. dev deps) ---
 FROM node:20-alpine AS deps
 WORKDIR /app
-# Copy root manifests so `npm ci` has the workspace package.json + lockfile.
-COPY package.json package-lock.json* ./
+# npm ci needs the full workspace tree (apps/* + packages/*) plus manifests.
+COPY . .
 RUN npm ci --workspace @expense-app/api --include-workspace-root
 WORKDIR /app/apps/api
 RUN npx prisma generate
