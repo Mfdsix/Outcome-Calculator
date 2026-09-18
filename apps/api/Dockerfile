@@ -28,6 +28,8 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 # Root node_modules (hoisted) holds production deps for the api workspace.
 COPY --from=deps /app/node_modules ./node_modules
+# Required: @expense-app/shared is a workspace package imported by dist/server.js.
+COPY packages ./packages
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh
