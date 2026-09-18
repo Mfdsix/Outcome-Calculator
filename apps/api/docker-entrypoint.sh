@@ -8,11 +8,15 @@ db_port=$(printf '%s' "${DATABASE_URL:-}" | sed -n 's|.*@\([^:/]*\):\([0-9]*\).*
 db_host=${db_host:-postgres}
 db_port=${db_port:-5432}
 
+# Probe via node TCP (ash/sh lacks /dev/tcp and nc isn't installed).
+probe() {
+  node -e "const net=require('net');const s=new net.Socket();s.setTimeout(500);s.connect(${db_port},'${db_host}',()=>s.destroy());s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1));" 2>/dev/null
+}
+
 echo "[entrypoint] Waiting for Postgres at ${db_host}:${db_port} ..."
 i=0
 while [ "$i" -lt 60 ]; do
-  if (exec 3<>"/dev/tcp/${db_host}/${db_port}") 2>/dev/null; then
-    exec 3>&- 3<&-
+  if probe; then
     echo "[entrypoint] Postgres is accepting connections."
     break
   fi
@@ -20,7 +24,7 @@ while [ "$i" -lt 60 ]; do
   sleep 1
 done
 
-if ! (exec 3<>"/dev/tcp/${db_host}/${db_port}") 2>/dev/null; then
+if ! probe; then
   echo "[entrypoint] ERROR: Postgres never became reachable at ${db_host}:${db_port} (60s)." >&2
   exit 1
 fi
