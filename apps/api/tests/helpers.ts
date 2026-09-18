@@ -55,6 +55,18 @@ export async function resetExpenses(userId: string): Promise<void> {
   await prisma.expense.deleteMany({ where: { userId } });
 }
 
+export async function resetBudgets(userId: string): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL ?? "";
+  const databaseName = databaseUrl.split("/").pop()?.split("?")[0] ?? "";
+  if (!databaseName.endsWith("_test")) {
+    throw new Error(
+      `SAFETY LATCH: resetBudgets called against non-test database "${databaseName}". ` +
+        "This would wipe development data. Use TEST_DATABASE_URL pointing to a _test DB.",
+    );
+  }
+  await prisma.budget.deleteMany({ where: { userId } });
+}
+
 export async function resetUsers(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL ?? "";
   const databaseName = databaseUrl.split("/").pop()?.split("?")[0] ?? "";

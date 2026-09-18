@@ -5,6 +5,8 @@ import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTi
 import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
+import { BudgetProgress } from "../components/BudgetProgress";
+import { BudgetScreen } from "../components/BudgetScreen";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { EditActions } from "../components/EditActions";
 import { Header } from "../components/Header";
@@ -16,6 +18,7 @@ import { SummaryList } from "../components/SummaryList";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UserMenu } from "../components/UserMenu";
+import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
 import {
@@ -230,6 +233,7 @@ function AppBody({ logout }: { logout: () => void }) {
     loading,
     openHistory,
     closeHistory,
+    setViewMode: setViewModeExternal,
     setSelectedKey,
     enterDrill,
     exitDrill,
@@ -240,6 +244,8 @@ function AppBody({ logout }: { logout: () => void }) {
   } = useExpenses();
 
   const calc = useCalculator();
+  const budget = useBudget();
+  const { getStatusNow } = budget;
   const [flash, setFlash] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
@@ -247,10 +253,14 @@ function AppBody({ logout }: { logout: () => void }) {
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
   const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
+  const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
+  const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpecial = viewMode === "special";
+  const isBudget = viewMode === "budget";
   const inDrill = specialPanel === "drill";
 
   const showError = useCallback((message: string) => {
@@ -259,16 +269,43 @@ function AppBody({ logout }: { logout: () => void }) {
     bannerTimer.current = setTimeout(() => setBanner(null), 4000);
   }, []);
 
+  /** Budget screen errors surface through the same banner (soft, plan §4). */
+  useEffect(() => {
+    if (budget.error) showError(budget.error);
+  }, [budget.error, showError]);
+
+  /** Refresh budget aggregates whenever expenses change (plan §4: refresh on
+   * create/update/delete expense so spent/remaining stay live). */
+  useEffect(() => {
+    budget.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenses]);
+
   const doFlash = useCallback(() => {
     setFlash(true);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(false), 350);
   }, []);
 
+  /** Post-Enter budget feedback (plan §3): soft toast warning/over + Enter
+   * blink. Best-effort, never blocks the input; silent without a budget. */
+  const announceBudgetStatus = useCallback(async () => {
+    const budget = await getStatusNow();
+    if (budget === null || budget.status === "ok") return;
+    setBudgetNotice(budget.status); // "warning" | "over"
+    setEnterFlash(budget.status);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => {
+      setBudgetNotice(false);
+      setEnterFlash(false);
+    }, 3000);
+  }, [getStatusNow]);
+
   useEffect(() => {
     return () => {
       if (bannerTimer.current) clearTimeout(bannerTimer.current);
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
     };
   }, []);
 
@@ -337,6 +374,8 @@ function AppBody({ logout }: { logout: () => void }) {
         const saved = await expensesApi.update(id, { amount });
         applyOptimisticUpdate(saved);
         doFlash();
+        // Amount is in — soft post-Enter budget feedback (plan §3).
+        void announceBudgetStatus();
         calc.clear();
         restoreHistory(editOrigin);
         clearEditOrigin();
@@ -349,7 +388,7 @@ function AppBody({ logout }: { logout: () => void }) {
         showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
       }
     },
-    [expenses, applyOptimisticUpdate, doFlash, logout, showError, calc, editOrigin, clearEditOrigin, restoreHistory],
+    [expenses, applyOptimisticUpdate, doFlash, logout, showError, calc, editOrigin, clearEditOrigin, restoreHistory, announceBudgetStatus],
   );
 
   const handleEnter = useCallback(async () => {
@@ -386,6 +425,8 @@ function AppBody({ logout }: { logout: () => void }) {
       const saved = await expensesApi.create({ amount });
       revertOptimisticCreate(optimistic);
       applyOptimisticCreate(saved);
+      // Amount is in — soft post-Enter budget feedback (plan §3).
+      void announceBudgetStatus();
     } catch (cause) {
       revertOptimisticCreate(optimistic);
       if (cause instanceof UnauthorizedError) {
@@ -394,7 +435,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError, editOrigin, clearEditOrigin, restoreHistory]);
+  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError, editOrigin, clearEditOrigin, restoreHistory, announceBudgetStatus]);
 
   // --- Special-mode data -------------------------------------------------------
 
@@ -560,6 +601,24 @@ function AppBody({ logout }: { logout: () => void }) {
     await commitUpdate(pending.id, pending.amount);
   }, [pendingUpdate, commitUpdate]);
 
+  // --- Budget actions (plan §3) ----------------------------------------------
+
+  const openBudget = useCallback(() => {
+    setViewModeExternal("budget");
+  }, [setViewModeExternal]);
+
+  const closeBudget = useCallback(() => {
+    setViewModeExternal("calculator");
+  }, [setViewModeExternal]);
+
+  const handleBudgetCreate = useCallback(
+    async (payload: { type: "full" | "daily"; amount: number; startDate: string; endDate: string }) =>
+      budget.createBudget(payload),
+    [budget],
+  );
+
+  const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budget]);
+
   // --- Keyboard (spec §25) -----------------------------------------------------
 
   // --- Keyboard (spec §25) -----------------------------------------------------
@@ -568,6 +627,12 @@ function AppBody({ logout }: { logout: () => void }) {
     const handler = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      if (isBudget) {
+        // Budget screen: Escape returns to the calculator; digits stay inert.
+        if (event.key === "Escape") closeBudget();
+        return;
+      }
 
        if (event.key === "Escape") {
          if (showUnsaved) {
@@ -632,12 +697,14 @@ function AppBody({ logout }: { logout: () => void }) {
     showUnsaved,
     calc,
     isSpecial,
+    isBudget,
     inDrill,
     handleNavigate,
     handleSpecialEnter,
     handleEnter,
     exitDrill,
     closeHistory,
+    closeBudget,
   ]);
 
   /** Clicking a chart bar: in day mode resolve to the first transaction in
@@ -716,7 +783,41 @@ function AppBody({ logout }: { logout: () => void }) {
       <Header
         periodLabel={periodLabel}
         totalLabel={totalLabel}
-        trailing={<UserMenu onLogout={logout} onAccountDeleted={logout} />}
+        trailing={
+          <>
+            <button
+              type="button"
+              aria-label="Buka budget"
+              data-testid="budget-open"
+              onClick={openBudget}
+              className={`flex h-11 w-11 items-center justify-center rounded-lg border transition-colors ${
+                budget.active?.status === "over"
+                  ? "border-red-900/70 bg-red-950/40 text-red-300"
+                  : budget.active?.status === "warning"
+                    ? "border-amber-900/70 bg-amber-950/40 text-amber-300"
+                    : "border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200"
+              }`}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {/* Wallet icon */}
+                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h11A2.5 2.5 0 0 1 19 7.5v9A2.5 2.5 0 0 1 16.5 19h-11A2.5 2.5 0 0 1 3 16.5z" />
+                <path d="M16 12h5v0a0 0 0 0 0 0 0" />
+                <circle cx="16.5" cy="12" r="0.5" fill="currentColor" />
+              </svg>
+            </button>
+            <UserMenu onLogout={logout} onAccountDeleted={logout} />
+          </>
+        }
       />
 
       {banner && (
@@ -729,95 +830,137 @@ function AppBody({ logout }: { logout: () => void }) {
         </div>
       )}
 
-      <PeriodSelector
-        highlight={isSpecial ? period : null}
-        onOpen={openHistory}
-        onActiveTap={inDrill ? exitDrill : closeHistory}
-      />
-
-      {!isSpecial && (
-        <AmountDisplay
-          display={calc.display}
-          editing={calc.isEditing}
-          flash={flash}
-        />
+      {budgetNotice !== false && !banner && (
+        <div
+          role="status"
+          data-testid="budget-notice"
+          className={`mb-2 shrink-0 rounded-lg border px-3 py-2 text-sm ${
+            budgetNotice === "over"
+              ? "border-red-900/70 bg-red-950/40 text-red-300"
+              : "border-amber-900/70 bg-amber-950/40 text-amber-300"
+          }`}
+        >
+          {budgetNotice === "over"
+            ? "Melebihi budget — pengeluaran tetap masuk."
+            : "Mendekati batas budget."}
+        </div>
       )}
 
-      {isSpecial ? (
+      {isBudget ? (
+        <BudgetScreen
+          active={budget.active}
+          history={budget.history}
+          loading={budget.loading}
+          onBack={closeBudget}
+          onCreate={handleBudgetCreate}
+          onRemove={handleBudgetRemove}
+        />
+      ) : (
         <>
-          {inDrill ? (
-            <BrowseList
-              rows={drillRows}
-              selectedKey={transactionKey}
-              onSelect={(key) => setSelectedKey(key)}
-            />
-          ) : (
-            <SummaryList
-              rows={summaryRows}
-              selectedKey={selectedKey}
-              onSelect={(key) => setSelectedKey(key)}
+          {!isSpecial && budget.active && (
+            <BudgetProgress
+              variant="micro"
+              type={budget.active.type}
+              amount={budget.active.amount}
+              spent={budget.active.todaySpent}
+              remaining={budget.active.remaining}
+              status={budget.active.status}
+              progressPct={budget.active.progressPct}
             />
           )}
 
-          <div className="shrink-0">
-            <BarChart
-              buckets={chartBuckets}
-              selectedKey={chartSelectedKey}
-              onSelect={handleBarSelect}
-            />
-          </div>
-
-          <Keypad
-            layout="special"
-            onDigit={() => {}}
-            onBackspace={() => {}}
-            onEnter={handleSpecialEnter}
-            enterDisabled={
-              inDrill
-                ? transactionKey === null
-                : period === "day"
-                  ? expenses.length === 0
-                  : chartBuckets.length === 0
-            }
-            onNavigate={handleNavigate}
-            navDisabled={navDisabled}
+          <PeriodSelector
+            highlight={isSpecial ? period : null}
+            onOpen={openHistory}
+            onActiveTap={inDrill ? exitDrill : closeHistory}
           />
 
+          {!isSpecial && (
+            <AmountDisplay
+              display={calc.display}
+              editing={calc.isEditing}
+              flash={flash}
+            />
+          )}
+
+          {isSpecial ? (
+            <>
+              {inDrill ? (
+                <BrowseList
+                  rows={drillRows}
+                  selectedKey={transactionKey}
+                  onSelect={(key) => setSelectedKey(key)}
+                />
+              ) : (
+                <SummaryList
+                  rows={summaryRows}
+                  selectedKey={selectedKey}
+                  onSelect={(key) => setSelectedKey(key)}
+                />
+              )}
+
+              <div className="shrink-0">
+                <BarChart
+                  buckets={chartBuckets}
+                  selectedKey={chartSelectedKey}
+                  onSelect={handleBarSelect}
+                />
+              </div>
+
+              <Keypad
+                layout="special"
+                onDigit={() => {}}
+                onBackspace={() => {}}
+                onEnter={handleSpecialEnter}
+                enterDisabled={
+                  inDrill
+                    ? transactionKey === null
+                    : period === "day"
+                      ? expenses.length === 0
+                      : chartBuckets.length === 0
+                }
+                onNavigate={handleNavigate}
+                navDisabled={navDisabled}
+              />
+
+            </>
+          ) : (
+            <>
+              <BarChart buckets={chartBuckets} />
+              <Keypad
+                onDigit={calc.pressDigit}
+                onBackspace={calc.pressBackspace}
+                onEnter={() => void handleEnter()}
+                enterFlash={enterFlash}
+                enterDisabled={
+                  calc.amount <= 0 ||
+                  Boolean(
+                    calc.isEditing &&
+                    calc.editingId &&
+                    expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
+                  )
+                }
+                />
+            </>
+          )}
+
+          {calc.isEditing && !isSpecial && (
+            <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
+          )}
         </>
-      ) : (
-        <>
-          <BarChart buckets={chartBuckets} />
-          <Keypad
-            onDigit={calc.pressDigit}
-            onBackspace={calc.pressBackspace}
-            onEnter={() => void handleEnter()}
-            enterDisabled={
-              calc.amount <= 0 ||
-              Boolean(
-                calc.isEditing &&
-                calc.editingId &&
-                expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
-              )
-            }
-            />
-          </>
-        )}
+      )}
 
-        {calc.isEditing && !isSpecial && (
-          <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
-        )}
+      {showUnsaved && (
+        <UnsavedDialog
+          onSave={() => {
+            setShowUnsaved(false);
+            void handleEnter();
+          }}
+          onCancel={handleEditBack}
+        />
+      )}
 
-        {showUnsaved && (
-          <UnsavedDialog
-            onSave={() => {
-              setShowUnsaved(false);
-              void handleEnter();
-            }}
-            onCancel={handleEditBack}
-          />
-        )}
-
-        {deleteTarget && (
+      {deleteTarget && (
         <DeleteDialog
           amountLabel={deleteLabel}
           busy={false}

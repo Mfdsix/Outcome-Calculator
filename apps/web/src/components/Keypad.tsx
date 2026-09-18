@@ -8,8 +8,12 @@ export interface KeypadProps {
   onEnter: () => void;
   enterDisabled: boolean;
   disabled?: boolean;
-  /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
-   * navDisabled (special mode only) dims + disables individual directions. */
+  /** Post-Enter budget blink (plan §3): brief amber/red pulse on Enter. */
+  enterFlash?: false | "warning" | "over";
+  /**
+   * Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
+   * navDisabled (special mode only) dims + disables individual directions.
+   */
   layout?: "calc" | "special";
   onNavigate?: (direction: "up" | "down" | "left" | "right") => void;
   navDisabled?: Partial<Record<"up" | "down" | "left" | "right", boolean>>;
@@ -28,6 +32,7 @@ export function Keypad({
   onEnter,
   enterDisabled,
   disabled,
+  enterFlash = false,
   layout = "calc",
   onNavigate,
   navDisabled,
@@ -139,7 +144,13 @@ export function Keypad({
         aria-label="Enter"
         disabled={enterDisabled}
         onClick={onEnter}
-        className="key-button bg-emerald-600 text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+        className={`key-button text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none ${
+          enterFlash === "over"
+            ? "bg-red-600 animate-pulse shadow-[0_2px_0_0_#7f1d1d]"
+            : enterFlash === "warning"
+              ? "bg-amber-500 animate-pulse shadow-[0_2px_0_0_#78350f]"
+              : "bg-emerald-600"
+        }`}
       >
         Enter
       </button>

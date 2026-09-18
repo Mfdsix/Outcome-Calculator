@@ -1,4 +1,7 @@
 import type {
+  BudgetActiveResponse,
+  BudgetHistoryItem,
+  CreateBudgetPayload,
   CreateExpensePayload,
   ExpenseDto,
   ExpenseListResponse,
@@ -189,6 +192,33 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ pin }),
     });
+  },
+};
+
+/**
+ * Budget endpoints (plan §4) — mirrors expensesApi conventions. The server
+ * computes spent/remaining/status; copy = plain create (auto-replaces the
+ * active budget, history keeps the old one).
+ */
+export const budgetsApi = {
+  getActive(): Promise<BudgetActiveResponse> {
+    return request<BudgetActiveResponse>("/api/budgets/active");
+  },
+
+  history(limit = 20): Promise<{ history: BudgetHistoryItem[] }> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    return request<{ history: BudgetHistoryItem[] }>(`/api/budgets/history?${query.toString()}`);
+  },
+
+  create(payload: CreateBudgetPayload): Promise<{ id: string }> {
+    return request<{ id: string }>("/api/budgets", {
+      method: "POST",
+      body: JSON.stringify({ ...payload }),
+    });
+  },
+
+  async remove(): Promise<void> {
+    await request<void>("/api/budgets/active", { method: "DELETE" });
   },
 };
 

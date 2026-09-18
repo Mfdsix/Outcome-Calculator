@@ -7,8 +7,10 @@ export type Period = "day" | "week" | "month";
  * - "special": D/W/M browse — navbar + SummaryList/BrowseList + chart
  *   selectedKey + special Keypad, with drill-down into a
  *   selected bucket.
+ * - "budget": dedicated budget screen (plan §3) — active card + history
+ *   ("Pakai lagi") + create form. Digits stay inert; keypad never blocked.
  */
-export type ViewMode = "calculator" | "special";
+export type ViewMode = "calculator" | "special" | "budget";
 
 /** Where the special browse list currently is. */
 export type SpecialPanel = "summary" | "drill";

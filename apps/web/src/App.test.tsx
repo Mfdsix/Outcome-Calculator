@@ -18,8 +18,13 @@ vi.mock("./lib/api", () => {
   const readLastVisit = vi.fn(() => 0);
   const writeLastVisit = vi.fn();
   const setAuthToken = vi.fn();
+  const budgetsGetActive = vi.fn();
+  const budgetsHistory = vi.fn();
+  const budgetsCreate = vi.fn();
+  const budgetsRemove = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
+    budgetsApi: { getActive: budgetsGetActive, history: budgetsHistory, create: budgetsCreate, remove: budgetsRemove },
     authApi: { login, refresh, deactivate },
     ApiError: class ApiError extends Error {
       status: number;
@@ -40,12 +45,21 @@ const createMock = vi.mocked(expensesApi.create);
 const loginMock = vi.mocked(authApi.login);
 const refreshMock = vi.mocked(authApi.refresh);
 const deactivateMock = vi.mocked(authApi.deactivate);
+import { budgetsApi } from "./lib/api";
+const budgetsGetActiveMock = vi.mocked(budgetsApi.getActive);
+const budgetsHistoryMock = vi.mocked(budgetsApi.history);
+const budgetsCreateMock = vi.mocked(budgetsApi.create);
+const budgetsRemoveMock = vi.mocked(budgetsApi.remove);
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   listMock.mockResolvedValue({ expenses: [], total: 0 });
   deactivateMock.mockResolvedValue(undefined);
+  budgetsGetActiveMock.mockResolvedValue({ budget: null });
+  budgetsHistoryMock.mockResolvedValue({ history: [] });
+  budgetsCreateMock.mockResolvedValue({ id: "budget-1" });
+  budgetsRemoveMock.mockResolvedValue(undefined);
   createMock.mockImplementation((payload) =>
     Promise.resolve({
       id: `created-${payload.amount}`,
