@@ -74,21 +74,24 @@ async function openSpecialWithRows(rows: Array<{ id: string; amount: number }>):
   await screen.findByTestId("summary-list");
 }
 
-describe("App — edit", () => {
-  it("loads selected expense into the calculator and updates it on enter", async () => {
+describe("App — edit (TODO: history affordance — control-bar removed in spec gabungan)", () => {
+  // Edit/hapus tidak di-render di special mode (plan: history without ControlBar).
+  // Handler handleEdit/confirmDelete + DeleteDialog tetap ada di App.tsx sebagai
+  // dead code yang siap dipasangkan affordance baru. Skip sampai UI-nya kembali.
+  it.skip("loads selected expense into the calculator and updates it on enter (pending history edit affordance)", async () => {
     const user = userEvent.setup();
-  listMock.mockResolvedValue({
-    expenses: [{ id: "e1", amount: 35000, occurredAt: new Date().toISOString() }],
-    total: 35000,
-  });
+    listMock.mockResolvedValue({
+      expenses: [{ id: "e1", amount: 35000, occurredAt: new Date().toISOString() }],
+      total: 35000,
+    });
 
-  await renderUnlocked();
-  await user.click(screen.getByTestId("period-day")); // → special mode
-  await screen.findByTestId("summary-list");
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-day")); // → special mode
+    await screen.findByTestId("summary-list");
 
-  await user.click(screen.getByTestId("key-enter")); // drill
-  await screen.findByTestId("browse-list");
-  await user.click(screen.getByTestId("browse-row-e1"));
+    await user.click(screen.getByTestId("key-enter")); // drill
+    await screen.findByTestId("browse-list");
+    await user.click(screen.getByTestId("browse-row-e1"));
     await user.click(screen.getByTestId("control-edit"));
 
     expect(screen.getByTestId("amount-display")).toHaveTextContent("35.000");
@@ -108,8 +111,8 @@ describe("App — edit", () => {
   });
 });
 
-describe("App — delete", () => {
-  it("requires confirmation and deletes on confirm", async () => {
+describe("App — delete (TODO: history affordance — control-bar removed in spec gabungan)", () => {
+  it.skip("requires confirmation and deletes on confirm (pending history delete affordance)", async () => {
     const user = userEvent.setup();
     await openSpecialWithRows([{ id: "e2", amount: 35000 }]);
 
@@ -125,7 +128,7 @@ describe("App — delete", () => {
     expect(screen.queryByTestId("delete-dialog")).not.toBeInTheDocument();
   });
 
-  it("keeps the expense when cancel is pressed", async () => {
+  it.skip("keeps the expense when cancel is pressed (pending history delete affordance)", async () => {
     const user = userEvent.setup();
     await openSpecialWithRows([{ id: "e3", amount: 35000 }]);
 

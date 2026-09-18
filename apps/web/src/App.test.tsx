@@ -239,18 +239,18 @@ describe("App — special mode (D/W/M browse)", () => {
     expect(screen.getByTestId("summary-list")).toBeInTheDocument();
   });
 
-  it("tapping the highlighted period is a no-op (still in history)", async () => {
+  it("tapping the highlighted green period returns to the calculator", async () => {
     const user = userEvent.setup();
     await renderUnlocked();
 
     await user.click(screen.getByTestId("period-week")); // open week history
     await screen.findByTestId("summary-list");
-
-    await user.click(screen.getByTestId("period-week")); // active → no-op
-    expect(screen.getByTestId("summary-list")).toBeInTheDocument();
     expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
-    // Still in history: amount display is hidden.
-    expect(screen.queryByTestId("amount-display")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("period-week")); // green tap → home
+    expect(await screen.findByTestId("amount-display")).toBeInTheDocument();
+    expect(screen.queryByTestId("summary-list")).not.toBeInTheDocument();
+    expect(screen.getByTestId("period-week")).not.toHaveAttribute("aria-current");
   });
 
   it("labels D/W/M persist when highlighted (no arrow glyph)", async () => {
@@ -334,26 +334,20 @@ describe("App — special mode (D/W/M browse)", () => {
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
     expect(screen.getByTestId("browse-row-d1")).toBeInTheDocument();
 
-    await user.click(screen.getByTestId("control-back")); // back to summary
+    // Back: tap the highlighted green period (today) → summary, then again → home.
+    await user.click(screen.getByTestId("period-day")); // drill → summary
     expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
+    await user.click(screen.getByTestId("period-day")); // summary → home
+    expect(await screen.findByTestId("amount-display")).toBeInTheDocument();
   });
 
-  it("day summary rows show hour buckets (e.g. 08:00) and week rows show date labels", async () => {
-    // Build a fixed timestamp: today at 08:15 WIB so the hour bucket is stable.
-    const today = new Date();
-    const hour = 8;
-    const occurredAt = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate(),
-      hour,
-      15,
-    ).toISOString(); // ISO in local; bucketed by Jakarta civil hour in chart.ts
-
-    // For day view the bucket key is YYYY-MM-DDTHH. The row label derived from
-    // key.slice(11,13) + ":00".
+  it("day summary rows show hour buckets (HH:00), week rows show date labels", async () => {
+    // Fixed expense at 08:15 Jakarta today so the civil-hour bucket is stable
+    // regardless of the CI runner's local timezone.
+    const tgl = getZonedParts(new Date(), "Asia/Jakarta");
+    const iso = `${tgl.year}-${String(tgl.month).padStart(2, "0")}-${String(tgl.day).padStart(2, "0")}T08:15:00+07:00`;
     listMock.mockResolvedValue({
-      expenses: [{ id: "d2", amount: 25000, occurredAt }],
+      expenses: [{ id: "d2", amount: 25000, occurredAt: iso }],
       total: 25000,
     });
     const user = userEvent.setup();
@@ -361,17 +355,17 @@ describe("App — special mode (D/W/M browse)", () => {
 
     await user.click(screen.getByTestId("period-day")); // → special, day buckets
     await screen.findByTestId("summary-list");
-    // The hour bucket label must be the hour portion, suffixed with :00.
-    const rows = screen.getAllByTestId(/^summary-row-/);
-    const hourRow = rows.find((row) => row.textContent?.includes(":00"));
-    expect(hourRow).toBeDefined();
+    const hourKey = `${tgl.year}-${String(tgl.month).padStart(2, "0")}-${String(tgl.day).padStart(2, "0")}T08`;
+    const hourRow = screen.getByTestId(`summary-row-${hourKey}`);
+    expect(hourRow).toHaveTextContent("08:00");
     expect(hourRow).toHaveTextContent("25.000");
 
     // Switch to week — labels become civil date labels via formatDateShort.
     await user.click(screen.getByTestId("period-week"));
     await screen.findByTestId("summary-list");
     const weekRows = screen.getAllByTestId(/^summary-row-/);
-    const sample = weekRows[0];
+    expect(weekRows.length).toBeGreaterThan(0);
+    const sample = weekRows[0]!;
     // Date label "DD Mon" pattern (id-ID), e.g. "17 Sep".
     expect(sample.textContent).toMatch(/\d{1,2}\s\w{3}/);
     expect(sample.textContent).not.toContain("Hari ini");

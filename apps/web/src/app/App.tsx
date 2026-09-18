@@ -5,7 +5,6 @@ import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTi
 import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
-import { ControlBar } from "../components/ControlBar";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { Header } from "../components/Header";
 import { Keypad } from "../components/Keypad";
@@ -39,11 +38,11 @@ function dayKeyOf(parts: { year: number; month: number; day: number }): string {
  * App shell (locked special-mode contract):
  * lock → default "half-D" calculator (Header / AmountDisplay / navbar /
  * hourly BarChart / calc Keypad) → special D/W/M browse (navbar +
- * SummaryList / BrowseList + chart selectedKey + special Keypad + ControlBar)
- * with drill-down, DeleteDialog, keyboard support and 401 → re-lock.
+ * SummaryList/BrowseList + chart selectedKey + nav Keypad + drill-down)
+ * with DeleteDialog, keyboard support and 401 → re-lock.
  * The user menu lives in the Header trailing cluster; the period selector is
- * a pure D/W/M switcher — tapping the active period opens history from the
- * calculator only (from special it is a no-op; exit via ControlBar / Esc).
+ * a pure D/W/M switcher — tapping any period from calculator opens history;
+ * tapping the active green period from history returns home.
  * Session: 20h token with ≥1h-interval visit refresh.
  */
 export default function App() {
@@ -551,6 +550,7 @@ function AppBody({ logout }: { logout: () => void }) {
       <PeriodSelector
         highlight={isSpecial ? period : null}
         onOpen={openHistory}
+        onActiveTap={inDrill ? exitDrill : closeHistory}
       />
 
       {!isSpecial && (
@@ -585,23 +585,15 @@ function AppBody({ logout }: { logout: () => void }) {
             />
           </div>
 
-          <ControlBar
-            selectedKey={inDrill ? transactionKey : selectedKey}
-            canEdit={(inDrill ? transactionKey : selectedKey) !== null}
-            busy={loading}
-            onEdit={handleEdit}
-            onDelete={() => setDeleteTarget(inDrill ? transactionKey : selectedKey)}
-            onBack={inDrill ? exitDrill : closeHistory}
-          />
-
-          {/* In special mode the keypad is calculator-mode only: digits and
-              backspace are inert (navigation happens via arrow keys / chart
-              rows); Enter drills into the selected bucket. */}
+          {/* TODO: history edit/hapus affordance — handleEdit/confirmDelete kept but
+              not surfaced yet (plan: history without ControlBar). */}
           <Keypad
+            layout="special"
             onDigit={() => {}}
             onBackspace={() => {}}
             onEnter={handleSpecialEnter}
             enterDisabled={inDrill}
+            onNavigate={handleNavigate}
           />
         </>
       ) : (

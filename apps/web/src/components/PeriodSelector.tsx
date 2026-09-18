@@ -3,9 +3,10 @@ import type { Period } from "../types/ui";
 export interface PeriodSelectorProps {
   /** Highlighted (special) period, or null in calculator mode. */
   highlight: Period | null;
-  /** Tap a period to open/swicth history. Tapping the highlighted period in
-   * history is a no-op — exit happens via ControlBar / Escape only. */
+  /** Tap a non-highlighted period to open history for it. */
   onOpen: (period: Period) => void;
+  /** Tap the highlighted green period — returns home (drill→summary→calculator). */
+  onActiveTap: () => void;
 }
 
 const PERIODS: Array<{ value: Period; label: string }> = [
@@ -17,10 +18,10 @@ const PERIODS: Array<{ value: Period; label: string }> = [
 /**
  * D / W / M switcher (plan §1). Labels are always D/W/M (never a glyph).
  * From the calculator, any tap (active or not) opens history for that period.
- * From history, tapping the highlighted green period returns to the calculator;
- * tapping a non-highlighted period switches the range and stays in history.
+ * From history, tapping the highlighted green period returns home; tapping a
+ * non-highlighted period switches the range and stays in history.
  */
-export function PeriodSelector({ highlight, onOpen }: PeriodSelectorProps) {
+export function PeriodSelector({ highlight, onOpen, onActiveTap }: PeriodSelectorProps) {
   const active = highlight ?? "day";
   return (
     <nav className="flex items-center justify-center gap-2 pb-3" data-testid="period-selector">
@@ -33,9 +34,9 @@ export function PeriodSelector({ highlight, onOpen }: PeriodSelectorProps) {
             type="button"
             aria-pressed={highlighted}
             aria-current={ariaCurrent}
-            aria-label={highlighted ? `Riwayat ${label} (tap lain untuk ganti)` : `Pilih ${label}`}
+            aria-label={highlighted ? `Kembali ke kalkulator dari ${label}` : `Pilih ${label}`}
             data-testid={`period-${value}`}
-            onClick={() => onOpen(value)}
+            onClick={() => (highlighted ? onActiveTap() : onOpen(value))}
             className={`min-h-11 min-w-14 rounded-lg border px-3 text-sm font-semibold transition-colors ${
               highlighted
                 ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-300"
