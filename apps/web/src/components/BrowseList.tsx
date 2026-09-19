@@ -8,6 +8,8 @@ export interface BrowseRow {
   mid?: string;
   right: string;
   id?: string;
+  /** True when this row carries an unsynced offline mutation (badge N). */
+  pending?: boolean;
 }
 
 export interface BrowseListProps {
@@ -15,6 +17,17 @@ export interface BrowseListProps {
   selectedKey: string | null;
   onSelect: (key: string) => void;
 }
+
+/** Amber dot marking a row with an unsynced offline mutation. */
+export const PendingDot = memo(function PendingDot() {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="pending-dot"
+      className="mr-1.5 inline-block size-1.5 rounded-full bg-yellow-400 align-middle"
+    />
+  );
+});
 
 /**
  * Scrollable list of rows beneath the chart. Used in both browse mode (date or
@@ -71,6 +84,7 @@ function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
           </span>
         )}
         <span className={`tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
+          {row.pending && <PendingDot />}
           {row.right}
         </span>
       </button>

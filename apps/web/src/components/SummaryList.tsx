@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import type { BrowseRow } from "./BrowseList";
+import { PendingDot, type BrowseRow } from "./BrowseList";
 import { useScrollSelected } from "./useScrollSelected";
 
 export interface SummaryListProps {
@@ -72,6 +72,7 @@ function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
           </span>
         )}
         <span className={`tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
+          {row.pending && <PendingDot />}
           {row.right}
         </span>
       </button>

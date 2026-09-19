@@ -5,6 +5,7 @@ import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTi
 import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
+import { ConnIndicator } from "../components/ConnIndicator";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { EditActions } from "../components/EditActions";
 import { Header } from "../components/Header";
@@ -15,11 +16,17 @@ import { LockScreen } from "../components/LockScreen";
 import { SummaryList } from "../components/SummaryList";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
+import { UpdateBanner } from "../components/UpdateBanner";
 import { UserMenu } from "../components/UserMenu";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
+import { useOnline } from "../hooks/useOnline";
+import { useSync } from "../hooks/useSync";
 import {
   ApiError,
+  isOnline,
+  loadToken,
+  OfflineError,
   UnauthorizedError,
   authApi,
   expensesApi,
@@ -27,7 +34,9 @@ import {
 } from "../lib/api";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
+import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
+import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
 
 const LAST_VISIT_KEY = "expense-app.last-visit";
@@ -35,6 +44,35 @@ const LAST_VISIT_KEY = "expense-app.last-visit";
 /** Civil day key (YYYY-MM-DD) from zoned parts, in APP_TIMEZONE semantics. */
 function dayKeyOf(parts: { year: number; month: number; day: number }): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/** Base64url decode (JWT payload segments). */
+function base64UrlDecode(segment: string): string {
+  const padded = segment.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+  // UTF-8 decode
+  return decodeURIComponent(
+    Array.from(binary, (char) => `%${("00" + char.charCodeAt(0).toString(16)).slice(-2)}`).join(""),
+  );
+}
+
+/** Outbox namespace: the JWT `sub` (userId) so re-login switches queues. */
+function outboxNamespace(): string {
+  const token = loadToken();
+  if (!token) return "";
+  const parts = token.split(".");
+  if (parts.length < 2 || parts[1]!.length === 0) return token;
+  try {
+    const payload = JSON.parse(base64UrlDecode(parts[1]!)) as { sub?: unknown };
+    return typeof payload.sub === "string" && payload.sub.length > 0 ? payload.sub : token;
+  } catch {
+    return token;
+  }
+}
+
+/** True when a mutation failed because the network was unavailable (status 0). */
+function isOfflineCause(cause: unknown): boolean {
+  return cause instanceof OfflineError || (cause instanceof ApiError && cause.status === 0);
 }
 
 /**
@@ -47,6 +85,9 @@ function dayKeyOf(parts: { year: number; month: number; day: number }): string {
  * a pure D/W/M switcher — tapping any period from calculator opens history;
  * tapping the active green period from history returns home.
  * Session: 20h token with ≥1h-interval visit refresh.
+ * Offline (plan §4–§7): Today CRUD queues into an IDB outbox and shows a
+ * pending badge; Week/Month stay online-only; the connection indicator in the
+ * Header reflects online state + sync progress.
  */
 export default function App() {
   const lock = useLockFlow();
@@ -87,7 +128,8 @@ interface LockFlow {
 
 function useLockFlow(): LockFlow {
   // A persisted token counts as a session; validity is enforced by the API
-  // (401 → re-lock) rather than an upfront ping.
+  // (401 → re-lock) rather than an upfront ping. The token also stays as the
+  // offline key: locked app still opens offline (plan §5).
   const [unlocked, setUnlocked] = useState<boolean>(() => {
     try {
       return localStorage.getItem("expense-app.token") !== null;
@@ -162,7 +204,8 @@ function useLockFlow(): LockFlow {
 
   // Visit effect (plan §3): on mount + when the tab becomes visible, refresh
   // the token if ≥1h since the last visit. Fresh visit → silent; stale →
-  // refresh; 401 → locked out; network error → silent (retry next visit).
+  // refresh; 401 → locked out; offline → skipped silently (retry next visit);
+  // network error → silent (retry next visit).
   useEffect(() => {
     if (!unlocked) return;
 
@@ -176,6 +219,7 @@ function useLockFlow(): LockFlow {
         last = 0;
       }
       if (Date.now() - last < TOKEN_REFRESH_MIN_INTERVAL_MS) return; // fresh → silent
+      if (!isOnline()) return; // offline → keep the session, retry later
 
       try {
         await authApi.refresh(); // writes lastVisit on success (lib/api)
@@ -237,6 +281,13 @@ function AppBody({ logout }: { logout: () => void }) {
     revertOptimisticCreate,
     applyOptimisticUpdate,
     applyOptimisticDelete,
+    renameExpenseId,
+    refresh,
+    markPending,
+    pendingIds,
+    showingCachedDay,
+    dayFetchFailed,
+    wmOfflineRejected,
   } = useExpenses();
 
   const calc = useCalculator();
@@ -250,14 +301,67 @@ function AppBody({ logout }: { logout: () => void }) {
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isSpecial = viewMode === "special";
-  const inDrill = specialPanel === "drill";
+  // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
+
+  const online = useOnline({ failed: dayFetchFailed });
+  const [syncTrigger, setSyncTrigger] = useState(0);
+  const bumpSync = useCallback(() => setSyncTrigger((value) => value + 1), []);
+  const drainMsgRef = useRef<string | null>(null);
+  const logoutRef = useRef(logout);
+  useEffect(() => {
+    logoutRef.current = logout;
+  }, [logout]);
 
   const showError = useCallback((message: string) => {
     setBanner(message);
     if (bannerTimer.current) clearTimeout(bannerTimer.current);
     bannerTimer.current = setTimeout(() => setBanner(null), 4000);
   }, []);
+
+  const onDropped = useCallback(
+    (message: string) => {
+      if (!message || drainMsgRef.current === message) return;
+      drainMsgRef.current = message;
+      showError(message);
+      window.setTimeout(() => {
+        drainMsgRef.current = null;
+      }, 4500);
+    },
+    [showError],
+  );
+
+  const { pending, syncing } = useSync({
+    enabled: true,
+    trigger: syncTrigger,
+    onDropped,
+    onUnauthorized: () => logoutRef.current(),
+  });
+
+  // Back online → reload the authoritative day list (also clears cache staleness).
+  const prevOnlineRef = useRef(online);
+  useEffect(() => {
+    if (online && !prevOnlineRef.current && period === "day") {
+      void refresh();
+    }
+    prevOnlineRef.current = online;
+  }, [online, period, refresh]);
+
+  // Outbox drained → reload the day so temp rows become server rows.
+  const prevPendingRef = useRef(0);
+  useEffect(() => {
+    if (prevPendingRef.current > 0 && pending === 0 && online && period === "day") {
+      void refresh();
+    }
+    prevPendingRef.current = pending;
+  }, [pending, online, period, refresh]);
+
+  // W/M refused while offline → hint banner.
+  useEffect(() => {
+    if (wmOfflineRejected) showError("Butuh internet untuk Week/Month.");
+  }, [wmOfflineRejected, showError]);
+
+  const isSpecial = viewMode === "special";
+  const inDrill = specialPanel === "drill";
 
   const doFlash = useCallback(() => {
     setFlash(true);
@@ -325,6 +429,102 @@ function AppBody({ logout }: { logout: () => void }) {
     clearEditOrigin();
   }, [calc, expenses, editOrigin, restoreHistory, clearEditOrigin]);
 
+  // --- Offline outbox helpers (plan §4/§6) ------------------------------------
+
+  /** Offline create+update coalesce at the queue: rewrite the temp create. */
+  const applyTempAmount = useCallback(async (tempId: string, amount: number) => {
+    const token = loadToken();
+    if (!token) return;
+    await mutateOutbox(token, (ops) => {
+      const next = ops.map((op) =>
+        op.type === "create" && op.tempId === tempId
+          ? { ...op, payload: { ...op.payload, amount } }
+          : op,
+      );
+      return { ops: next, result: next.length };
+    });
+    await mutateTodayCache((cache) => {
+      const previous = cache.expenses.find((item) => item.id === tempId);
+      const delta = previous ? amount - previous.amount : 0;
+      return {
+        ...cache,
+        expenses: cache.expenses.map((item) => (item.id === tempId ? { ...item, amount } : item)),
+        total: cache.total + delta,
+      };
+    });
+  }, []);
+
+  /** Offline create+delete coalesce at the queue: drop the whole temp chain. */
+  const dropTempChain = useCallback(async (tempId: string) => {
+    const token = loadToken();
+    if (!token) return;
+    await mutateOutbox(token, (ops) => {
+      const next = ops.filter((op) => op.tempId !== tempId && op.realId !== tempId);
+      return { ops: next, result: next.length };
+    });
+    // Also purge the temp row from the snapshot (create+edit+delete offline).
+    await mutateTodayCache((cache) => {
+      const previous = cache.expenses.find((item) => item.id === tempId);
+      return {
+        ...cache,
+        expenses: cache.expenses.filter((item) => item.id !== tempId),
+        total: cache.total - (previous?.amount ?? 0),
+      };
+    });
+  }, []);
+
+  /** Patch the snapshot for an offline update/delete of a real row. */
+  const patchCacheRow = useCallback(
+    async (id: string, next: { amount: number } | null) => {
+      await mutateTodayCache((cache) => {
+        const previous = cache.expenses.find((item) => item.id === id);
+        if (next === null) {
+          return {
+            ...cache,
+            expenses: cache.expenses.filter((item) => item.id !== id),
+            total: cache.total - (previous?.amount ?? 0),
+          };
+        }
+        const delta = previous ? next.amount - previous.amount : 0;
+        return {
+          ...cache,
+          expenses: cache.expenses.map((item) =>
+            item.id === id ? { ...item, amount: next.amount } : item,
+          ),
+          total: cache.total + delta,
+        };
+      });
+    },
+    [],
+  );
+
+  /** Replace a local optimistic row id with the outbox temp id. */
+  const replaceLocalId = useCallback(
+    (localId: string, tempId: string, amount: number) => {
+      renameExpenseId(localId, tempId);
+    },
+    [renameExpenseId],
+  );
+
+  /** Queue an offline create and swap the optimistic row onto the temp id. */
+  const saveOfflineCreate = useCallback(
+    async (amount: number, occurredAt: string, localId: string) => {
+      const token = loadToken();
+      if (!token) return;
+      const tempId = await queueOfflineCreate(token, { amount, occurredAt });
+      replaceLocalId(localId, tempId, amount);
+      markPending(tempId);
+      // Persist into the today snapshot so an airplane reload keeps the row.
+      await mutateTodayCache((cache) => ({
+        ...cache,
+        expenses: [{ id: tempId, amount, occurredAt }, ...cache.expenses],
+        total: cache.total + amount,
+      }));
+      bumpSync();
+    },
+    [queueOfflineCreate, replaceLocalId, markPending, bumpSync],
+  );
+
   /** Commit a pending edit: optimistic update + API call + flash/error.
    * Extracted so handleEnter and UpdateDialog confirm share one path. */
   const commitUpdate = useCallback(
@@ -332,6 +532,19 @@ function AppBody({ logout }: { logout: () => void }) {
       const previous = expenses.find((item) => item.id === id);
       if (previous) {
         applyOptimisticUpdate({ ...previous, amount });
+      }
+      if (!online && previous && !previous.id.startsWith("temp-")) {
+        const token = loadToken();
+        if (token) {
+          await queueOfflineUpdate(token, previous.id, amount);
+          markPending(previous.id);
+          await patchCacheRow(previous.id, { amount });
+          bumpSync();
+          calc.clear();
+          restoreHistory(editOrigin);
+          clearEditOrigin();
+          return;
+        }
       }
       try {
         const saved = await expensesApi.update(id, { amount });
@@ -341,15 +554,49 @@ function AppBody({ logout }: { logout: () => void }) {
         restoreHistory(editOrigin);
         clearEditOrigin();
       } catch (cause) {
-        if (previous) applyOptimisticUpdate(previous);
         if (cause instanceof UnauthorizedError) {
+          if (previous) applyOptimisticUpdate(previous);
           logout();
           return;
         }
+        if (isOfflineCause(cause) && previous) {
+          // Offline: keep the optimistic amount and queue the mutation.
+          if (previous.id.startsWith("temp-")) {
+            await applyTempAmount(previous.id, amount);
+          } else {
+            const token = loadToken();
+            if (token) {
+              await queueOfflineUpdate(token, previous.id, amount);
+              await patchCacheRow(previous.id, { amount });
+            }
+          }
+          markPending(previous.id);
+          bumpSync();
+          doFlash();
+          calc.clear();
+          restoreHistory(editOrigin);
+          clearEditOrigin();
+          return;
+        }
+        if (previous) applyOptimisticUpdate(previous);
         showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
       }
     },
-    [expenses, applyOptimisticUpdate, doFlash, logout, showError, calc, editOrigin, clearEditOrigin, restoreHistory],
+    [
+      expenses,
+      online,
+      applyOptimisticUpdate,
+      applyTempAmount,
+      markPending,
+      bumpSync,
+      doFlash,
+      logout,
+      showError,
+      calc,
+      editOrigin,
+      clearEditOrigin,
+      restoreHistory,
+    ],
   );
 
   const handleEnter = useCallback(async () => {
@@ -374,27 +621,53 @@ function AppBody({ logout }: { logout: () => void }) {
       return;
     }
 
+    const occurredAt = new Date().toISOString();
     const optimistic = {
       id: `optimistic-${Date.now()}`,
       amount,
-      occurredAt: new Date().toISOString(),
+      occurredAt,
     };
     calc.clear();
     applyOptimisticCreate(optimistic);
     doFlash();
+
+    if (!online) {
+      await saveOfflineCreate(amount, occurredAt, optimistic.id);
+      return;
+    }
+
     try {
       const saved = await expensesApi.create({ amount });
       revertOptimisticCreate(optimistic);
       applyOptimisticCreate(saved);
     } catch (cause) {
-      revertOptimisticCreate(optimistic);
       if (cause instanceof UnauthorizedError) {
+        revertOptimisticCreate(optimistic);
         logout();
         return;
       }
+      if (isOfflineCause(cause)) {
+        // Network dropped mid-flight: keep the row, queue for later sync.
+        await saveOfflineCreate(amount, occurredAt, optimistic.id);
+        return;
+      }
+      revertOptimisticCreate(optimistic);
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [calc, expenses, applyOptimisticCreate, revertOptimisticCreate, doFlash, logout, showError, editOrigin, clearEditOrigin, restoreHistory]);
+  }, [
+    calc,
+    expenses,
+    online,
+    applyOptimisticCreate,
+    revertOptimisticCreate,
+    doFlash,
+    logout,
+    showError,
+    saveOfflineCreate,
+    editOrigin,
+    clearEditOrigin,
+    restoreHistory,
+  ]);
 
   // --- Special-mode data -------------------------------------------------------
 
@@ -440,7 +713,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
       setSelectedKey(expenses[next]?.id ?? null);
     },
-     [expenses, selectedKey, setSelectedKey],
+    [expenses, selectedKey, setSelectedKey],
   );
 
   const handleNavigate = useCallback(
@@ -509,10 +782,10 @@ function AppBody({ logout }: { logout: () => void }) {
     const id = inDrill ? transactionKey : selectedKey;
     const expense = expenses.find((item) => item.id === id);
     if (!expense) return;
-     setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
-     calc.startEdit(expense.id, expense.amount);
-     closeHistory();
-   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
+    setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
+    calc.startEdit(expense.id, expense.amount);
+    closeHistory();
+  }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
 
   const handleSpecialEnter = useCallback(() => {
     // Drill / day-summary: Enter edits the selected transaction directly.
@@ -539,28 +812,74 @@ function AppBody({ logout }: { logout: () => void }) {
       calc.clear();
     }
     applyOptimisticDelete(id);
+
+    if (!online) {
+      const token = loadToken();
+      if (token) {
+        if (id.startsWith("temp-")) {
+          await dropTempChain(id);
+        } else {
+          await queueOfflineDelete(token, id);
+          await patchCacheRow(id, null);
+        }
+        bumpSync();
+      }
+      restoreHistory(editOrigin);
+      clearEditOrigin();
+      return;
+    }
+
     try {
       await expensesApi.remove(id);
       restoreHistory(editOrigin);
       clearEditOrigin();
     } catch (cause) {
-      if (expense) applyOptimisticCreate(expense);
       if (cause instanceof UnauthorizedError) {
+        if (expense) applyOptimisticCreate(expense);
         logout();
         return;
       }
+      if (isOfflineCause(cause)) {
+        const token = loadToken();
+        if (token) {
+          if (id.startsWith("temp-")) {
+            await dropTempChain(id);
+          } else {
+            await queueOfflineDelete(token, id);
+            await patchCacheRow(id, null);
+          }
+          bumpSync();
+          restoreHistory(editOrigin);
+          clearEditOrigin();
+          return;
+        }
+      }
+      if (expense) applyOptimisticCreate(expense);
       showError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
     }
-  }, [applyOptimisticCreate, applyOptimisticDelete, calc, deleteTarget, expenses, logout, showError, editOrigin, clearEditOrigin, restoreHistory]);
+  }, [
+    expenses,
+    online,
+    applyOptimisticCreate,
+    applyOptimisticDelete,
+    calc,
+    deleteTarget,
+    dropTempChain,
+    patchCacheRow,
+    bumpSync,
+    logout,
+    showError,
+    editOrigin,
+    clearEditOrigin,
+    restoreHistory,
+  ]);
 
   const confirmUpdate = useCallback(async () => {
-    const pending = pendingUpdate;
-    if (!pending) return;
+    const pendingUpdateValue = pendingUpdate;
+    if (!pendingUpdateValue) return;
     setPendingUpdate(null);
-    await commitUpdate(pending.id, pending.amount);
+    await commitUpdate(pendingUpdateValue.id, pendingUpdateValue.amount);
   }, [pendingUpdate, commitUpdate]);
-
-  // --- Keyboard (spec §25) -----------------------------------------------------
 
   // --- Keyboard (spec §25) -----------------------------------------------------
 
@@ -569,23 +888,23 @@ function AppBody({ logout }: { logout: () => void }) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
 
-       if (event.key === "Escape") {
-         if (showUnsaved) {
-           setShowUnsaved(false);
-           return;
-         }
-         if (deleteTarget) {
-           setDeleteTarget(null);
-           return;
-         }
-         if (pendingUpdate) {
-           setPendingUpdate(null);
-           return;
-         }
-         if (isSpecial && inDrill) exitDrill();
-         else if (isSpecial) closeHistory();
-         return;
-       }
+      if (event.key === "Escape") {
+        if (showUnsaved) {
+          setShowUnsaved(false);
+          return;
+        }
+        if (deleteTarget) {
+          setDeleteTarget(null);
+          return;
+        }
+        if (pendingUpdate) {
+          setPendingUpdate(null);
+          return;
+        }
+        if (isSpecial && inDrill) exitDrill();
+        else if (isSpecial) closeHistory();
+        return;
+      }
 
       if (showUnsaved || deleteTarget || pendingUpdate) return; // modal decision pending — ignore other keys
 
@@ -609,11 +928,6 @@ function AppBody({ logout }: { logout: () => void }) {
         return;
       }
 
-      if (calc.isEditing) {
-        // Edit mode: Backspace corrects the input (handled below). Other keys
-        // fall through; no delete-on-backspace anymore.
-      }
-
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
         calc.pressDigit(event.key);
@@ -630,6 +944,7 @@ function AppBody({ logout }: { logout: () => void }) {
   }, [
     deleteTarget,
     showUnsaved,
+    pendingUpdate,
     calc,
     isSpecial,
     inDrill,
@@ -674,8 +989,9 @@ function AppBody({ logout }: { logout: () => void }) {
         left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
         right: groupDigits(String(item.amount)),
         id: item.id,
+        pending: pendingIds.has(item.id),
       }));
-  }, [drillDayKey, expenses, inDrill]);
+  }, [drillDayKey, expenses, inDrill, pendingIds]);
 
   /** Build a civil date label (e.g. "15 Sep") from a YYYY-MM-DD bucket key. */
   const dateLabelFromKey = (key: string): string => {
@@ -697,6 +1013,7 @@ function AppBody({ logout }: { logout: () => void }) {
         mid: formatDateShort(new Date(item.occurredAt), APP_TIMEZONE),
         right: groupDigits(String(item.amount)),
         id: item.id,
+        pending: pendingIds.has(item.id),
       }));
     }
     return groupExpensesByDay(expenses).map((day) => ({
@@ -704,7 +1021,7 @@ function AppBody({ logout }: { logout: () => void }) {
       left: dateLabelFromKey(day.key),
       right: groupDigits(String(day.total)),
     }));
-  }, [inDrill, period, expenses, chartBuckets]);
+  }, [inDrill, period, expenses, pendingIds]);
 
   const deleteLabel = (() => {
     const expense = expenses.find((item) => item.id === deleteTarget);
@@ -716,8 +1033,11 @@ function AppBody({ logout }: { logout: () => void }) {
       <Header
         periodLabel={periodLabel}
         totalLabel={totalLabel}
+        status={<ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />}
         trailing={<UserMenu onLogout={logout} onAccountDeleted={logout} />}
       />
+
+      <UpdateBanner />
 
       {banner && (
         <div
@@ -733,6 +1053,7 @@ function AppBody({ logout }: { logout: () => void }) {
         highlight={isSpecial ? period : null}
         onOpen={openHistory}
         onActiveTap={inDrill ? exitDrill : closeHistory}
+        disabledVisual={online ? [] : ["week", "month"]}
       />
 
       {!isSpecial && (
@@ -782,7 +1103,6 @@ function AppBody({ logout }: { logout: () => void }) {
             onNavigate={handleNavigate}
             navDisabled={navDisabled}
           />
-
         </>
       ) : (
         <>
@@ -799,25 +1119,25 @@ function AppBody({ logout }: { logout: () => void }) {
                 expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
               )
             }
-            />
-          </>
-        )}
-
-        {calc.isEditing && !isSpecial && (
-          <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
-        )}
-
-        {showUnsaved && (
-          <UnsavedDialog
-            onSave={() => {
-              setShowUnsaved(false);
-              void handleEnter();
-            }}
-            onCancel={handleEditBack}
           />
-        )}
+        </>
+      )}
 
-        {deleteTarget && (
+      {calc.isEditing && !isSpecial && (
+        <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
+      )}
+
+      {showUnsaved && (
+        <UnsavedDialog
+          onSave={() => {
+            setShowUnsaved(false);
+            void handleEnter();
+          }}
+          onCancel={handleEditBack}
+        />
+      )}
+
+      {deleteTarget && (
         <DeleteDialog
           amountLabel={deleteLabel}
           busy={false}

@@ -4,7 +4,8 @@ import type { ExpenseDto } from "@expense-app/shared";
 
 import { expensesApi } from "../lib/api";
 import { formatIDRAbbreviated } from "../lib/currency";
-import { PERIOD_LABEL, periodQuery } from "../lib/periods";
+import { civilDayKey, loadTodayCache, saveTodayCache, type TodayCache } from "../lib/offlineDb";
+import { periodQuery, PERIOD_LABEL } from "../lib/periods";
 import type { Period, SpecialPanel, ViewMode } from "../types/ui";
 
 export interface UseExpensesResult {
@@ -20,6 +21,12 @@ export interface UseExpensesResult {
   periodLabel: string;
   loading: boolean;
   error: string | null;
+  /** Server data is unavailable — UI is showing the cached day snapshot. */
+  showingCachedDay: boolean;
+  /** True when the last day fetch failed at the network level (status 0). */
+  dayFetchFailed: boolean;
+  /** True when a W/M open was rejected because the app is offline. */
+  wmOfflineRejected: boolean;
   /** Open the special browse for `next`; resets panel + selection. */
   openHistory: (next: Period) => void;
   /** Return to the default calculator (period resets to "day"). */
@@ -34,6 +41,11 @@ export interface UseExpensesResult {
   revertOptimisticCreate: (expense: ExpenseDto) => void;
   applyOptimisticUpdate: (expense: ExpenseDto) => void;
   applyOptimisticDelete: (id: string) => { hadListEntry: boolean };
+  /** Swap a local optimistic row id for the outbox temp id (stale-safe). */
+  renameExpenseId: (from: string, to: string) => void;
+  /** Track which expense ids carry unsynced local mutations (badge N). */
+  markPending: (id: string) => void;
+  pendingIds: Set<string>;
 }
 
 export function useExpenses(): UseExpensesResult {
@@ -45,9 +57,21 @@ export function useExpenses(): UseExpensesResult {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showingCachedDay, setShowingCachedDay] = useState(false);
+  const [dayFetchFailed, setDayFetchFailed] = useState(false);
+  const [wmOfflineRejected, setWmOfflineRejected] = useState(false);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   const reloadIdRef = useRef(0);
   const inflightRef = useRef<AbortController | null>(null);
+
+  const markPending = useCallback((id: string) => {
+    setPendingIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(() => {
     inflightRef.current?.abort();
@@ -57,22 +81,70 @@ export function useExpenses(): UseExpensesResult {
     const reloadId = ++reloadIdRef.current;
     setLoading(true);
     const { from, to } = periodQuery(period);
+    const nowIso = new Date().toISOString();
+    const dayKey = civilDayKey(nowIso);
 
     expensesApi
-      .list(from, to)
+      .list(from, to, nowIso)
       .then((response) => {
         if (reloadIdRef.current !== reloadId) return;
         setExpenses(response.expenses);
         setTotal(response.total);
         setError(null);
+        setShowingCachedDay(false);
+        setDayFetchFailed(false);
+        setWmOfflineRejected(false);
+        if (period === "day") {
+          void saveTodayCache({
+            expenses: response.expenses,
+            total: response.total,
+            dayKey,
+            from,
+            to,
+            occurredAt: nowIso,
+          });
+        }
       })
-      .catch((cause: unknown) => {
+      .catch(async (cause: unknown) => {
         if (reloadIdRef.current !== reloadId) return;
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not save expense.\nTry again.",
-        );
+        const status = (cause as { status?: number }).status ?? 0;
+        if (status === 0) {
+          // Network failure: fall back to the cached day (day only).
+          setDayFetchFailed(true);
+          if (period === "day") {
+            const cache: TodayCache | null = await loadTodayCache();
+            if (reloadIdRef.current !== reloadId) return;
+            // Merge strategy: the cache is the base snapshot; in-memory rows
+            // that are not in it (optimistic/temp rows created offline, or
+            // rows just applied by the failed fetch itself) win — the outbox
+            // holds newer truth than the last successful server read.
+            if (cache && cache.dayKey === dayKey) {
+              setExpenses((current) => {
+                const known = new Set(cache.expenses.map((item) => item.id));
+                const extras = current.filter((item) => !known.has(item.id));
+                const merged = [...extras, ...cache.expenses].sort(
+                  (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+                );
+                setTotal((t) => t + extras.reduce((sum, item) => sum + item.amount, 0));
+                return merged;
+              });
+              setShowingCachedDay(true);
+              setError(null);
+              return;
+            }
+            // No usable cache: keep whatever in-memory state we already have
+            // (e.g. optimistic rows just created offline) instead of wiping it.
+            setError(null);
+            setShowingCachedDay(true);
+            return;
+          }
+          // W/M offline (already guarded in openHistory) — empty list + hint.
+          setExpenses([]);
+          setTotal(0);
+          setError("Butuh internet untuk Week/Month.");
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
       })
       .finally(() => {
         if (reloadIdRef.current === reloadId) setLoading(false);
@@ -86,6 +158,16 @@ export function useExpenses(): UseExpensesResult {
 
   /** Open the special browse view for `next`; resets panel + selection. */
   const openHistory = useCallback((next: Period) => {
+    if (next !== "day" && !navigator.onLine) {
+      // Plan §5: Week/Month stay online-only; refuse the switch offline.
+      setWmOfflineRejected(true);
+      setPeriodState("day");
+      setViewMode("special");
+      setSpecialPanel("summary");
+      setSelectedKeyState(null);
+      return;
+    }
+    setWmOfflineRejected(false);
     setPeriodState(next);
     setViewMode("special");
     setSpecialPanel("summary");
@@ -160,6 +242,12 @@ export function useExpenses(): UseExpensesResult {
     return { hadListEntry };
   }, []);
 
+  /** Swap a local optimistic row id for the outbox temp id. Functional so it
+   * never suffers the stale-closure problem of capture-at-call-time lists. */
+  const renameExpenseId = useCallback((from: string, to: string) => {
+    setExpenses((current) => current.map((item) => (item.id === from ? { ...item, id: to } : item)));
+  }, []);
+
   const totalLabel = formatIDRAbbreviated(total);
   const periodLabel = PERIOD_LABEL[period];
 
@@ -174,6 +262,9 @@ export function useExpenses(): UseExpensesResult {
     periodLabel,
     loading,
     error,
+    showingCachedDay,
+    dayFetchFailed,
+    wmOfflineRejected,
     openHistory,
     closeHistory,
     setViewMode: setViewModeExternal,
@@ -186,5 +277,8 @@ export function useExpenses(): UseExpensesResult {
     revertOptimisticCreate,
     applyOptimisticUpdate,
     applyOptimisticDelete,
+    renameExpenseId,
+    markPending,
+    pendingIds,
   };
 }

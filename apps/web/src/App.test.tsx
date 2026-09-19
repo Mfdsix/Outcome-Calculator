@@ -29,9 +29,18 @@ vi.mock("./lib/api", () => {
       }
     },
     UnauthorizedError: class UnauthorizedError extends Error {},
+    OfflineError: class OfflineError extends Error {
+      status = 0;
+      constructor() {
+        super("offline");
+        this.name = "OfflineError";
+      }
+    },
     readLastVisit,
     writeLastVisit,
+    loadToken: vi.fn((): string | null => null),
     setAuthToken,
+    isOnline: vi.fn(() => true),
   };
 });
 

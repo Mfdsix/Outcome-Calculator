@@ -12,9 +12,10 @@ vi.mock("./lib/api", () => {
   const remove = vi.fn();
   const login = vi.fn();
   const refresh = vi.fn();
+  const deactivate = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
-    authApi: { login, refresh },
+    authApi: { login, refresh, deactivate },
     ApiError: class ApiError extends Error {
       status: number;
       constructor(status: number, message: string) {
@@ -22,10 +23,19 @@ vi.mock("./lib/api", () => {
         this.status = status;
       }
     },
+    OfflineError: class OfflineError extends Error {
+      status = 0;
+      constructor() {
+        super("offline");
+        this.name = "OfflineError";
+      }
+    },
     UnauthorizedError: class UnauthorizedError extends Error {},
     readLastVisit: vi.fn(() => 0),
     writeLastVisit: vi.fn(),
+    loadToken: vi.fn((): string | null => null),
     setAuthToken: vi.fn(),
+    isOnline: vi.fn(() => true),
   };
 });
 
