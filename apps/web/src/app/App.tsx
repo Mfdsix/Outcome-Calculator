@@ -278,12 +278,36 @@ function AppBody({ logout }: { logout: () => void }) {
    * a live expense.
    */
   useEffect(() => {
+    if (expenses.length === 0) return;
+    // day summary & drill default to the newest transaction.
     const isTxMode = inDrill || period === "day";
-    if (!isTxMode || expenses.length === 0) return;
-    if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
-      setSelectedKey(expenses[0]?.id ?? null);
+    if (isTxMode) {
+      if (inDrill && drillDayKey && selectedKey !== null) {
+        const dayKey = drillDayKey;
+        const inDay = expenses.some(
+          (item) =>
+            dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey &&
+            item.id === selectedKey,
+        );
+        if (inDay) return; // already a valid in-day selection
+      }
+      const domain =
+        inDrill && drillDayKey
+          ? expenses.filter(
+              (item) =>
+                dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
+            )
+          : expenses;
+      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
+        setSelectedKey(domain[0]?.id ?? null);
+      }
+      return;
     }
-  }, [expenses, inDrill, period, selectedKey, setSelectedKey]);
+    // W/M: auto-select the first (newest) day bucket if none valid.
+    if (selectedKey !== null) return;
+    const keys = groupExpensesByDay(expenses).map((day) => day.key);
+    setSelectedKey(keys[0] ?? null);
+  }, [expenses, inDrill, period, selectedKey, drillDayKey, setSelectedKey, setDrillDayKey]);
 
   /** In drill mode the transaction-facing selection lives in a second slot
    * so the bucket selection (chart) is preserved for when we go back up. */
@@ -525,10 +549,20 @@ function AppBody({ logout }: { logout: () => void }) {
     const fallback = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
     const target = selectedKey ?? fallback;
     if (target && chartBuckets.some((bucket) => bucket.key === target)) {
-      setDrillDayKey(target.slice(0, 10));
+      const dayKey = target.slice(0, 10);
+      setDrillDayKey(dayKey);
       enterDrill();
+      // Auto-select the newest transaction of the drilled day.
+      const dayTx =
+        expenses
+          .filter(
+            (item) =>
+              dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey,
+          )
+          .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())[0];
+      setSelectedKey(dayTx?.id ?? null);
     }
-  }, [chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey]);
+  }, [chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey, expenses, setDrillDayKey, setSelectedKey]);
 
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
@@ -737,12 +771,6 @@ function AppBody({ logout }: { logout: () => void }) {
   const effectivePeriodLabel = useMemo(() => {
     if (inDrill && drillDayKey) {
       return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)}`;
-    }
-    if (!inDrill && period !== "day") {
-      const bucket = summaryRows.find((r) => r.key === selectedKey);
-      if (bucket && bucket.left) {
-        return `${bucket.left} · ${bucket.mid ?? ""}`;
-      }
     }
     return periodLabel;
   }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);

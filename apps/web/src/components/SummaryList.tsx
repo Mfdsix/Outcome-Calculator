@@ -59,7 +59,7 @@ function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
         onClick={() => onSelect(row.key)}
         data-testid={`summary-row-${row.key}`}
         aria-pressed={selected}
-        className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-2.5 text-left transition-colors ${
+        className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-2.5 text-left focus-visible:outline-none focus-visible:ring-0 transition-colors ${
           selected ? "bg-neutral-800/80" : "active:bg-neutral-900"
         }`}
       >
