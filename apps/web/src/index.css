@@ -53,6 +53,25 @@ body {
   }
 }
 
+@keyframes insight-marquee {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.insight-marquee {
+  display: inline-block;
+  min-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  width: max-content;
+  animation: insight-marquee 10s linear infinite;
+}
+
 @keyframes shake {
   0%,
   100% {

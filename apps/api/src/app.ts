@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { registerAuth } from "./auth.js";
 import { loadEnv } from "./env.js";
 import { prisma } from "./prisma.js";
+import { budgetRoutes } from "./routes/budgets.js";
 import { expenseRoutes } from "./routes/expenses.js";
 
 export interface BuildAppOptions {
@@ -22,6 +23,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   await app.register(cors, { origin: true });
   registerAuth(app, env.jwtSecret);
   await app.register(expenseRoutes, { prisma, appTimezone });
+  await app.register(budgetRoutes, { prisma, appTimezone });
 
   return app;
 }

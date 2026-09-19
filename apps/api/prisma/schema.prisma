@@ -20,6 +20,7 @@ model User {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   expenses Expense[]
+  budgets  Budget[]
 
   @@map("users")
 }
@@ -39,4 +40,36 @@ model Expense {
 
   @@index([userId, occurredAt])
   @@map("expenses")
+}
+
+/// Budget type: "full" = one cap for the whole range; "daily" = cap per day.
+enum BudgetType {
+  full
+  daily
+}
+
+/// Budget (feature plan §1): ONE active budget per user; deactivating an old
+/// budget IS the history (no soft-delete flag, no row deletion — "Pakai lagi"
+/// reads past budgets to prefill the create form). Spent is NOT stored: it is
+/// recomputed live from expenses inside the budget range so edited expenses
+/// always stay consistent.
+model Budget {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Scope per PIN identity, same pattern as Expense.userId.
+  userId    String     @map("user_id") @db.Uuid
+  type      BudgetType
+  /// Total cap (full) / per-day cap (daily). Reuses amountSchema bounds.
+  amount    BigInt     @db.BigInt
+  /// Inclusive calendar dates (no time-of-day component).
+  startDate DateTime   @map("start_date") @db.Date
+  endDate   DateTime   @map("end_date") @db.Date
+  /// Exactly one per user at any time (enforced in a transaction on create —
+  /// plan §1: no partial unique index needed).
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive, startDate])
+  @@map("budgets")
 }

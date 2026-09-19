@@ -18,8 +18,13 @@ vi.mock("./lib/api", () => {
   const readLastVisit = vi.fn(() => 0);
   const writeLastVisit = vi.fn();
   const setAuthToken = vi.fn();
+  const budgetsGetActive = vi.fn();
+  const budgetsHistory = vi.fn();
+  const budgetsCreate = vi.fn();
+  const budgetsRemove = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
+    budgetsApi: { getActive: budgetsGetActive, history: budgetsHistory, create: budgetsCreate, remove: budgetsRemove },
     authApi: { login, refresh, deactivate },
     ApiError: class ApiError extends Error {
       status: number;
@@ -40,12 +45,21 @@ const createMock = vi.mocked(expensesApi.create);
 const loginMock = vi.mocked(authApi.login);
 const refreshMock = vi.mocked(authApi.refresh);
 const deactivateMock = vi.mocked(authApi.deactivate);
+import { budgetsApi } from "./lib/api";
+const budgetsGetActiveMock = vi.mocked(budgetsApi.getActive);
+const budgetsHistoryMock = vi.mocked(budgetsApi.history);
+const budgetsCreateMock = vi.mocked(budgetsApi.create);
+const budgetsRemoveMock = vi.mocked(budgetsApi.remove);
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   listMock.mockResolvedValue({ expenses: [], total: 0 });
   deactivateMock.mockResolvedValue(undefined);
+  budgetsGetActiveMock.mockResolvedValue({ budget: null });
+  budgetsHistoryMock.mockResolvedValue({ history: [] });
+  budgetsCreateMock.mockResolvedValue({ id: "budget-1" });
+  budgetsRemoveMock.mockResolvedValue(undefined);
   createMock.mockImplementation((payload) =>
     Promise.resolve({
       id: `created-${payload.amount}`,
@@ -558,21 +572,23 @@ describe("App — user menu", () => {
     expect(screen.getByTestId("keypad")).toBeInTheDocument(); // still unlocked
   });
 
-  it("orders menu items: PIN, divider, delete (red+icon), logout (neutral+icon)", async () => {
+  it("orders menu items: PIN, divider, budget, insight, divider, delete (red+icon), logout (neutral+icon)", async () => {
     const user = userEvent.setup();
     await renderUnlocked();
     await user.click(screen.getByTestId("user-menu-button"));
     await screen.findByTestId("user-menu");
 
     const menu = screen.getByTestId("user-menu");
-    // DOM order: pin row → divider → delete → logout (no second divider).
     const pinRow = screen.getByTestId("user-menu-pin");
-    const divider = menu.querySelector(".border-neutral-800.border-t");
+    const budget = screen.getByTestId("user-menu-budget");
+    const insight = screen.getByTestId("user-menu-insight");
     const del = screen.getByTestId("user-menu-delete-account");
     const logout = screen.getByTestId("user-menu-logout");
 
-    expect(pinRow.compareDocumentPosition(divider!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(divider!.compareDocumentPosition(del) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // DOM order: pin → budget → insight → delete → logout (with 2 dividers).
+    expect(pinRow.compareDocumentPosition(budget) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(budget.compareDocumentPosition(insight) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(insight.compareDocumentPosition(del) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(del.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // Colors.
@@ -583,8 +599,29 @@ describe("App — user menu", () => {
     expect(del.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(logout.querySelector("svg[aria-hidden='true']")).not.toBeNull();
 
-    // No second divider between delete and logout.
-    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(1);
+    // Two dividers: one after PIN, one before delete.
+    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(2);
+  });
+
+  it("toggling the insight ticker from the insight screen hides it on home", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    // Visible by default.
+    expect(await screen.findByTestId("insight-ticker")).toBeInTheDocument();
+
+    // Open user menu → open insight screen → toggle off → back to home.
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(screen.getByTestId("user-menu-insight"));
+    expect(await screen.findByTestId("insight-screen")).toBeInTheDocument();
+
+    const toggle = await screen.findByTestId("insight-ticker-toggle");
+    expect(toggle).toHaveAttribute("aria-label", "Matikan running text");
+    await user.click(toggle);
+
+    await user.click(screen.getByTestId("insight-back"));
+    expect(await screen.findByTestId("keypad")).toBeInTheDocument();
+    expect(screen.queryByTestId("insight-ticker")).not.toBeInTheDocument();
   });
 });
 

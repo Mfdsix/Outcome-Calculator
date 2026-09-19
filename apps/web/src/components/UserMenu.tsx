@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import type { BudgetStatus } from "@expense-app/shared";
+
 import { DeleteAccountDialog } from "./DeleteAccountDialog";
 import { ApiError, authApi } from "../lib/api";
 
@@ -8,6 +10,12 @@ export interface UserMenuProps {
   onLogout: () => void;
   /** Called after account deactivation succeeds (token cleared, re-lock). */
   onAccountDeleted: () => void;
+  /** Current active budget status (for the status dot on the menu item). */
+  budgetStatus: BudgetStatus | null;
+  /** Opens the budget screen. */
+  onOpenBudget: () => void;
+  /** Opens the insight screen. */
+  onOpenInsight: () => void;
 }
 
   /**
@@ -18,7 +26,7 @@ export interface UserMenuProps {
    * owned by this component. Closes via tap-outside, Escape, or after
    * logout/deletion.
    */
-export function UserMenu({ onLogout, onAccountDeleted }: UserMenuProps) {
+export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudget, onOpenInsight }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -113,66 +121,136 @@ export function UserMenu({ onLogout, onAccountDeleted }: UserMenuProps) {
             <span className="text-xs text-neutral-500">PIN</span>
             <span className="text-sm font-medium tabular-nums text-neutral-200">••••••</span>
           </div>
-           <div className="mx-3 border-t border-neutral-800" />
-           <button
-             type="button"
-             role="menuitem"
-             data-testid="user-menu-delete-account"
-             onClick={() => {
-               setOpen(false);
-               setDialogError(null);
-               setShowDeleteDialog(true);
-             }}
-             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
-           >
-             <svg
-               width="16"
-               height="16"
-               viewBox="0 0 24 24"
-               fill="none"
-               stroke="currentColor"
-               strokeWidth="1.8"
-               strokeLinecap="round"
-               strokeLinejoin="round"
-               aria-hidden="true"
-             >
-               <path d="M3 6h18" />
-               <path d="M9 9V4a3 3 0 0 1 6 0v5" />
-               <path d="M10 12v6" />
-               <path d="M14 12v6" />
-               <rect x="5" y="12" width="14" height="8" rx="1" />
-             </svg>
-             Hapus akun
-           </button>
-           <button
-             type="button"
-             role="menuitem"
-             data-testid="user-menu-logout"
-             onClick={() => {
-               setOpen(false);
-               onLogout();
-             }}
-             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
-           >
-             <svg
-               width="16"
-               height="16"
-               viewBox="0 0 24 24"
-               fill="none"
-               stroke="currentColor"
-               strokeWidth="1.8"
-               strokeLinecap="round"
-               strokeLinejoin="round"
-               aria-hidden="true"
-             >
-               <path d="M9 18l6-6-6-6" />
-               <path d="M15 12H4" />
-               <path d="M5 5V3" />
-               <circle cx="18" cy="18" r="3" />
-             </svg>
-             Keluar
-           </button>
-         </div>
+          <div className="mx-3 border-t border-neutral-800" />
+
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-budget"
+            onClick={() => {
+              setOpen(false);
+              onOpenBudget();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h11A2.5 2.5 0 0 1 19 7.5v9A2.5 2.5 0 0 1 16.5 19h-11A2.5 2.5 0 0 1 3 16.5z" />
+              <circle cx="16.5" cy="12" r="0.5" fill="currentColor" />
+            </svg>
+            <span className="flex-1">Budget</span>
+            {budgetStatus !== null && (
+              <span
+                className={`h-2 w-2 shrink-0 rounded-full ${
+                  budgetStatus === "over"
+                    ? "bg-red-400"
+                    : budgetStatus === "warning"
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
+                }`}
+                aria-label={budgetStatus}
+              />
+            )}
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-insight"
+            onClick={() => {
+              setOpen(false);
+              onOpenInsight();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <line x1="12" y1="10.5" x2="12" y2="16.5" />
+              <circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
+            </svg>
+            Insight
+          </button>
+
+          <div className="mx-3 my-1 border-t border-neutral-800" />
+
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-delete-account"
+            onClick={() => {
+              setOpen(false);
+              setDialogError(null);
+              setShowDeleteDialog(true);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-red-300 active:bg-neutral-800"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M9 9V4a3 3 0 0 1 6 0v5" />
+              <path d="M10 12v6" />
+              <path d="M14 12v6" />
+              <rect x="5" y="12" width="14" height="8" rx="1" />
+            </svg>
+            Hapus akun
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-logout"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 18l6-6-6-6" />
+              <path d="M15 12H4" />
+              <path d="M5 5V3" />
+              <circle cx="18" cy="18" r="3" />
+            </svg>
+            Keluar
+          </button>
+        </div>
       )}
 
       {showDeleteDialog && (

@@ -14,6 +14,12 @@ vi.mock("./lib/api", () => {
   const refresh = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
+    budgetsApi: {
+      getActive: vi.fn().mockResolvedValue({ budget: null }),
+      history: vi.fn().mockResolvedValue({ history: [] }),
+      create: vi.fn().mockResolvedValue({ id: "budget-1" }),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
     authApi: { login, refresh },
     ApiError: class ApiError extends Error {
       status: number;
