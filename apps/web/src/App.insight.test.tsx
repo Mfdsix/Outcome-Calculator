@@ -120,6 +120,10 @@ describe("App — insight ticker (calculator mode)", () => {
 
   it("ticker hides in special mode (no fight over the row)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    listMock.mockResolvedValue({
+      expenses: [{ id: "e1", amount: 5000, occurredAt: new Date().toISOString() }],
+      total: 5000,
+    });
     await renderUnlocked();
     await screen.findByTestId("insight-ticker");
 
@@ -128,6 +132,11 @@ describe("App — insight ticker (calculator mode)", () => {
     expect(screen.queryByTestId("insight-ticker")).not.toBeInTheDocument();
   });
 });
+
+async function openUserMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByTestId("user-menu-button"));
+  await screen.findByTestId("user-menu");
+}
 
 describe("App — insight screen (tap & ⓘ)", () => {
   it("tapping the ticker opens the full insight list", async () => {
@@ -147,7 +156,8 @@ describe("App — insight screen (tap & ⓘ)", () => {
     await renderUnlocked();
     const user = userEvent.setup();
 
-    await user.click(screen.getByTestId("insight-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
     expect(await screen.findByTestId("insight-screen")).toBeInTheDocument();
     expect(screen.getByTestId("insight-item-no-budget")).toBeInTheDocument();
     expect(screen.getByTestId("insight-cta-budget")).toBeInTheDocument();
@@ -161,7 +171,8 @@ describe("App — insight screen (tap & ⓘ)", () => {
     await renderUnlocked();
     const user = userEvent.setup();
 
-    await user.click(screen.getByTestId("insight-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
     await screen.findByTestId("insight-screen");
     await user.click(screen.getByTestId("insight-back"));
 
@@ -172,7 +183,8 @@ describe("App — insight screen (tap & ⓘ)", () => {
     await renderUnlocked();
     const user = userEvent.setup();
 
-    await user.click(screen.getByTestId("insight-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
     await screen.findByTestId("insight-screen");
     expect(screen.queryByTestId("keypad")).not.toBeInTheDocument();
 
@@ -183,10 +195,11 @@ describe("App — insight screen (tap & ⓘ)", () => {
   });
 
   it("CTA 'Atur budget' jumps to the budget screen", async () => {
-    await renderUnlocked();
     const user = userEvent.setup();
+    await renderUnlocked();
 
-    await user.click(screen.getByTestId("insight-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
     await screen.findByTestId("insight-screen");
     await user.click(screen.getByTestId("insight-cta-budget"));
 

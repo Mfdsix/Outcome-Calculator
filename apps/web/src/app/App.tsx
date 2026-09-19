@@ -259,6 +259,7 @@ function AppBody({ logout }: { logout: () => void }) {
     }, 0);
   }, [expenses]);
   const { insights } = useInsights(budget.active, todayTotal);
+  const [insightTickerVisible, setInsightTickerVisible] = useState(true);
   const [flash, setFlash] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
@@ -813,61 +814,13 @@ function AppBody({ logout }: { logout: () => void }) {
         totalLabel={totalLabel}
         trailing={
           <>
-            <button
-              type="button"
-              aria-label="Buka budget"
-              data-testid="budget-open"
-              onClick={openBudget}
-              className={`flex h-11 w-11 items-center justify-center rounded-lg border transition-colors ${
-                budget.active?.status === "over"
-                  ? "border-red-900/70 bg-red-950/40 text-red-300"
-                  : budget.active?.status === "warning"
-                    ? "border-amber-900/70 bg-amber-950/40 text-amber-300"
-                    : "border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200"
-              }`}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {/* Wallet icon */}
-                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h11A2.5 2.5 0 0 1 19 7.5v9A2.5 2.5 0 0 1 16.5 19h-11A2.5 2.5 0 0 1 3 16.5z" />
-                <path d="M16 12h5v0a0 0 0 0 0 0 0" />
-                <circle cx="16.5" cy="12" r="0.5" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Lihat insight"
-              data-testid="insight-open"
-              onClick={openInsight}
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-900/60 text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {/* Info icon (i in a circle) — same border pattern as wallet */}
-                <circle cx="12" cy="12" r="9" />
-                <line x1="12" y1="10.5" x2="12" y2="16.5" />
-                <circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
-              </svg>
-            </button>
-            <UserMenu onLogout={logout} onAccountDeleted={logout} />
+            <UserMenu
+              onLogout={logout}
+              onAccountDeleted={logout}
+              budgetStatus={budget.active?.status ?? null}
+              onOpenBudget={openBudget}
+              onOpenInsight={openInsight}
+            />
           </>
         }
       />
@@ -911,12 +864,14 @@ function AppBody({ logout }: { logout: () => void }) {
         <InsightScreen
           insights={insights}
           hasBudget={budget.active !== null}
+          tickerVisible={insightTickerVisible}
+          onToggleTicker={() => setInsightTickerVisible((v) => !v)}
           onBack={closeInsight}
           onOpenBudget={openBudget}
         />
       ) : (
         <>
-          {!isSpecial && (
+          {!isSpecial && insightTickerVisible && (
             <InsightTicker insights={insights} onOpen={openInsight} />
           )}
 

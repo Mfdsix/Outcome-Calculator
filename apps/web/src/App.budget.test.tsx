@@ -104,10 +104,16 @@ async function renderUnlocked(pin = "ABC123") {
   return user;
 }
 
+async function openUserMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByTestId("user-menu-button"));
+  await screen.findByTestId("user-menu");
+}
+
 describe("App — budget entry + calculator hygiene", () => {
-  it("opens the budget screen from the header button", async () => {
+  it("opens the budget screen from the user menu", async () => {
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     expect(await screen.findByTestId("budget-screen")).toBeInTheDocument();
     expect(screen.queryByTestId("keypad")).not.toBeInTheDocument();
@@ -115,7 +121,8 @@ describe("App — budget entry + calculator hygiene", () => {
 
   it("Escape returns from the budget screen to the calculator", async () => {
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-screen");
 
     await user.keyboard("{Escape}");
@@ -124,6 +131,7 @@ describe("App — budget entry + calculator hygiene", () => {
   });
 
   it("no budget → sterile numbers on the calculator + empty state with CTA", async () => {
+    const user = userEvent.setup();
     await renderUnlocked();
 
     expect(screen.queryByTestId("budget-micro")).not.toBeInTheDocument();
@@ -132,8 +140,8 @@ describe("App — budget entry + calculator hygiene", () => {
       "Pasang budget biar ada yang ngingetin.",
     );
 
-    const user = userEvent.setup();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     expect(await screen.findByTestId("budget-empty")).toHaveTextContent("Belum ada budget.");
     expect(screen.queryByTestId("budget-history")).not.toBeInTheDocument(); // hidden, not noisy
@@ -163,7 +171,8 @@ describe("App — budget screen: active card + history", () => {
       activeBudget({ type: "full", amount: 10_000_000, spent: 3_600_000, remaining: 6_400_000, progressPct: 36 }),
     );
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     const card = await screen.findByTestId("budget-card");
     expect(card).toHaveTextContent("Rp6.400.000");
@@ -178,7 +187,8 @@ describe("App — budget screen: active card + history", () => {
     getActiveMock.mockResolvedValue(activeBudget());
     historyMock.mockResolvedValue({ history: [historyItem()] });
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     const item = await screen.findByTestId("budget-history-item-hist-1");
     expect(item).toHaveTextContent("1–31 Agu • Penuh");
@@ -193,7 +203,8 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     const item = historyItem();
     historyMock.mockResolvedValue({ history: [item] });
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-history-item-hist-1");
     await user.click(screen.getByTestId("budget-use-again-hist-1"));
@@ -215,7 +226,7 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     const item = historyItem();
     historyMock.mockResolvedValue({ history: [item] });
     createBudgetMock.mockImplementation(async () => {
-      // Server-side: create deactivates the old and returns the new active.
+      // Server-side: create deactives the old and returns the new active.
       getActiveMock.mockResolvedValue(
         activeBudget({
           id: "budget-2",
@@ -231,7 +242,8 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     });
 
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-history-item-hist-1");
     await user.click(screen.getByTestId("budget-use-again-hist-1"));
 
@@ -249,7 +261,8 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
   it("'Ganti' on the active card prefills from the active budget itself (finished period CTA)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-card");
     await user.click(screen.getByTestId("budget-active-ganti"));
@@ -269,7 +282,8 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
       activeBudget({ startDate: "2020-08-01", endDate: "2020-08-31" }),
     );
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     const card = await screen.findByTestId("budget-card");
     expect(card).toHaveTextContent("Selesai");
@@ -337,7 +351,8 @@ describe("App — post-Enter budget toast (plan §3)", () => {
 describe("App — create + remove budget", () => {
   it("creates from the bare form and clears the amount on success", async () => {
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-form");
     await user.click(screen.getByTestId("budget-type-daily"));
@@ -356,7 +371,8 @@ describe("App — create + remove budget", () => {
   it("create failure shows the banner but the calculator stays usable (soft warning)", async () => {
     createBudgetMock.mockRejectedValue(new Error("Invalid budget."));
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-form");
     await user.type(screen.getByTestId("budget-amount"), "150000");
@@ -375,7 +391,8 @@ describe("App — create + remove budget", () => {
       getActiveMock.mockResolvedValue({ budget: null });
     });
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-card");
 
     await user.click(screen.getByTestId("budget-active-hapus"));
@@ -390,7 +407,8 @@ describe("App — create + remove budget", () => {
   it("cancel keeps the active budget", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
-    await user.click(screen.getByTestId("budget-open"));
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-card");
 
     await user.click(screen.getByTestId("budget-active-hapus"));

@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Insight } from "@expense-app/shared";
 
-const TONE_DOT: Record<Insight["tone"], string> = {
-  ok: "bg-emerald-400",
-  warn: "bg-amber-400",
-  over: "bg-red-400",
-  info: "bg-neutral-400",
+const TONE_BG: Record<Insight["tone"], string> = {
+  ok: "bg-neutral-900/60",
+  info: "bg-neutral-900/60",
+  warn: "bg-amber-950/30",
+  over: "bg-red-950/30",
 };
 
 /** Rotation cadence (plan §3): 4 seconds per insight, fade between. */
@@ -27,6 +27,7 @@ export function InsightTicker({ insights, onOpen }: InsightTickerProps) {
   // Single insight → nothing to rotate; keep the index pinned at 0.
   const [index, setIndex] = useState(0);
   const count = insights.length;
+  const textRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (count <= 1) return;
@@ -41,6 +42,16 @@ export function InsightTicker({ insights, onOpen }: InsightTickerProps) {
   const insight = insights[safeIndex];
   if (!insight) return null;
 
+  // Width-aware marquee: duration scales with text length; zero dead gap on loop.
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const distance = el.scrollWidth;
+    const pxPerSec = 50;
+    const duration = Math.max(5, distance / pxPerSec);
+    el.style.animationDuration = `${duration}s`;
+  }, [safeIndex, insight.short]);
+
   return (
     <button
       type="button"
@@ -48,10 +59,13 @@ export function InsightTicker({ insights, onOpen }: InsightTickerProps) {
       role="status"
       aria-label={`Insight: ${insight.short} — ketuk untuk lihat semua`}
       onClick={onOpen}
-      className="mb-1 flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-[11px] text-neutral-400 transition-colors hover:bg-neutral-900/60"
+       className={`relative mb-1 flex w-full items-center overflow-hidden rounded-lg px-1 py-0.5 text-left text-[11px] text-neutral-400 transition-colors hover:bg-neutral-900/60 ${TONE_BG[insight.tone]}`}
     >
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[insight.tone]}`} aria-hidden="true" />
-      <span key={insight.id} className="animate-insight-fade truncate">
+      <span
+        key={insight.id}
+        ref={textRef}
+        className="insight-marquee whitespace-nowrap"
+      >
         {insight.short}
       </span>
     </button>

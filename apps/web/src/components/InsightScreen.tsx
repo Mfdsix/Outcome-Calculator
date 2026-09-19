@@ -11,6 +11,10 @@ export interface InsightScreenProps {
   insights: Insight[];
   /** True when no active budget — shows the "Atur budget" CTA. */
   hasBudget: boolean;
+  /** Whether the running insight ticker is visible on the home screen. */
+  tickerVisible: boolean;
+  /** Toggle the running insight ticker visibility on the home screen. */
+  onToggleTicker: () => void;
   onBack: () => void;
   onOpenBudget: () => void;
 }
@@ -21,11 +25,11 @@ export interface InsightScreenProps {
  * BudgetScreen (top bar + back). Without a budget the CTA jumps to the
  * budget screen so the user can set one up.
  */
-export function InsightScreen({ insights, hasBudget, onBack, onOpenBudget }: InsightScreenProps) {
+export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTicker, onBack, onOpenBudget }: InsightScreenProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="insight-screen">
-      {/* Top bar — same pattern as BudgetScreen */}
-      <div className="flex items-center gap-2 pb-2">
+      {/* Top bar — back button + toggle, same row */}
+      <div className="flex items-center justify-between pb-2">
         <button
           type="button"
           aria-label="Kembali ke kalkulator"
@@ -35,7 +39,33 @@ export function InsightScreen({ insights, hasBudget, onBack, onOpenBudget }: Ins
         >
           ←
         </button>
-        <h1 className="text-base font-semibold text-neutral-100">Insight</h1>
+        <span className="text-base font-semibold text-neutral-100">Insight</span>
+        <span
+          className="relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors"
+          onClick={onToggleTicker}
+          data-testid="insight-ticker-toggle"
+          aria-label={tickerVisible ? "Matikan running text" : "Nyalakan running text"}
+        >
+          <input
+            type="checkbox"
+            checked={tickerVisible}
+            onChange={() => {}}
+            readOnly
+            className="sr-only"
+            aria-label="Tampilkan running text di beranda"
+          />
+          <span
+            className={`absolute inset-0 rounded-full transition-colors ${
+              tickerVisible ? "bg-emerald-600" : "bg-neutral-600"
+            }`}
+            aria-hidden="true"
+          />
+          <span
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
+              tickerVisible ? "left-4" : "left-0.5"
+            }`}
+          />
+        </span>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">
