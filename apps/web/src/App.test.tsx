@@ -238,7 +238,8 @@ describe("App — special mode (D/W/M browse)", () => {
     await renderUnlocked();
 
     await user.click(screen.getByTestId("period-week"));
-    expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
+    // Empty by default → sparse W/M list renders the empty state (no zero rows).
+    await screen.findByTestId("summary-empty");
     expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
     expect(screen.getByTestId("period-week")).toHaveAttribute("aria-pressed", "true");
   });
@@ -265,12 +266,12 @@ describe("App — special mode (D/W/M browse)", () => {
     await renderUnlocked();
 
     await user.click(screen.getByTestId("period-week")); // open week history
-    await screen.findByTestId("summary-list");
+    await screen.findByTestId("summary-empty");
     expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
 
     await user.click(screen.getByTestId("period-week")); // green tap → home
     expect(await screen.findByTestId("amount-display")).toBeInTheDocument();
-    expect(screen.queryByTestId("summary-list")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("summary-empty")).not.toBeInTheDocument();
     expect(screen.getByTestId("period-week")).not.toHaveAttribute("aria-current");
   });
 
@@ -295,7 +296,7 @@ describe("App — special mode (D/W/M browse)", () => {
     await renderUnlocked();
 
     await user.click(screen.getByTestId("period-week")); // single tap opens history
-    expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
+    await screen.findByTestId("summary-empty");
 
     const expected = last7DaysRange(new Date(), "Asia/Jakarta");
     const from = getZonedParts(expected.from, "Asia/Jakarta");
@@ -312,7 +313,7 @@ describe("App — special mode (D/W/M browse)", () => {
     await renderUnlocked();
 
     await user.click(screen.getByTestId("period-month")); // single tap opens history
-    expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
+    await screen.findByTestId("summary-empty");
 
     const expected = last30DaysRange(new Date(), "Asia/Jakarta");
     const from = getZonedParts(expected.from, "Asia/Jakarta");
@@ -569,6 +570,35 @@ describe("App — user menu", () => {
     expect(screen.queryByTestId("delete-account-dialog")).not.toBeInTheDocument();
     expect(deactivateMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("keypad")).toBeInTheDocument(); // still unlocked
+  });
+
+  it("orders menu items: PIN, divider, delete (red+icon), logout (neutral+icon)", async () => {
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("user-menu-button"));
+    await screen.findByTestId("user-menu");
+
+    const menu = screen.getByTestId("user-menu");
+    // DOM order: pin row → divider → delete → logout (no second divider).
+    const pinRow = screen.getByTestId("user-menu-pin");
+    const divider = menu.querySelector(".border-neutral-800.border-t");
+    const del = screen.getByTestId("user-menu-delete-account");
+    const logout = screen.getByTestId("user-menu-logout");
+
+    expect(pinRow.compareDocumentPosition(divider!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider!.compareDocumentPosition(del) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(del.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Colors.
+    expect(del).toHaveClass("text-red-300");
+    expect(logout).toHaveClass("text-neutral-200");
+
+    // Icons present (16px SVGs, aria-hidden).
+    expect(del.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    expect(logout.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+
+    // No second divider between delete and logout.
+    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(1);
   });
 });
 
