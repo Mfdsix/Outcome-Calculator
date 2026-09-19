@@ -58,19 +58,19 @@ function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
         onClick={() => onSelect(row.key)}
         data-testid={`browse-row-${row.key}`}
         aria-pressed={selected}
-        className={`flex w-full items-center justify-between px-1 py-3 text-left transition-colors ${
+        className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-3 text-left transition-colors ${
           selected ? "bg-neutral-800/80" : "active:bg-neutral-900"
         }`}
       >
-        <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
+        <span className={`col-span-1 text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
           {row.left}
         </span>
         {row.mid && (
-          <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
+          <span className={`col-span-1 text-right text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
             {row.mid}
           </span>
         )}
-        <span className={`tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
+        <span className={`col-span-1 text-right tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
           {row.right}
         </span>
       </button>

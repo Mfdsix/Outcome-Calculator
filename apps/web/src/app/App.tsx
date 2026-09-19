@@ -27,7 +27,8 @@ import {
 } from "../lib/api";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
-import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
+import { APP_TIMEZONE, currentPeriodRange, toIsoDateOnly } from "../lib/periods";
+import { relativeDayLabel } from "../lib/dayLabels";
 import type { EditOrigin, Period } from "../types/ui";
 
 const LAST_VISIT_KEY = "expense-app.last-visit";
@@ -466,24 +467,24 @@ function AppBody({ logout }: { logout: () => void }) {
             moveTransactionSelection(direction);
             return;
           }
-          const keys = chartBuckets.map((bucket) => bucket.key);
+          const keys = groupExpensesByDay(expenses).map((day) => day.key);
           if (keys.length === 0) return;
           const index = keys.indexOf(selectedKey ?? "");
           const valid = index < 0 ? 0 : index;
           const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
-          setSelectedKey(keys[next] ?? null);
+      setSelectedKey(keys[next] ?? null);
           return;
         }
       }
     },
-    [openHistory, period, inDrill, moveTransactionSelection, chartBuckets, selectedKey, setSelectedKey],
+    [openHistory, period, inDrill, moveTransactionSelection, expenses, selectedKey, setSelectedKey],
   );
 
   const navDisabled = useMemo<Partial<Record<"up" | "down" | "left" | "right", boolean>>>(() => {
     const domainKeys =
       inDrill || period === "day"
         ? expenses.map((e) => e.id)
-        : chartBuckets.map((b) => b.key);
+        : groupExpensesByDay(expenses).map((day) => day.key);
 
     if (domainKeys.length === 0) {
       return {
@@ -686,6 +687,9 @@ function AppBody({ logout }: { logout: () => void }) {
     return formatDateShort(new Date(isoAtMidnight), APP_TIMEZONE);
   };
 
+  /** Current time reference for relative day labels (recomputed each render). */
+  const now = useMemo(() => new Date(), []);
+
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
@@ -694,17 +698,54 @@ function AppBody({ logout }: { logout: () => void }) {
       return expenses.map((item) => ({
         key: item.id,
         left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
-        mid: formatDateShort(new Date(item.occurredAt), APP_TIMEZONE),
+        mid: "Today",
         right: groupDigits(String(item.amount)),
         id: item.id,
       }));
     }
     return groupExpensesByDay(expenses).map((day) => ({
       key: day.key,
-      left: dateLabelFromKey(day.key),
+      left: relativeDayLabel(day.key, now),
+      mid: dateLabelFromKey(day.key),
       right: groupDigits(String(day.total)),
     }));
   }, [inDrill, period, expenses, chartBuckets]);
+
+  const drillDayTotal = useMemo(
+    () =>
+      inDrill && drillDayKey
+        ? expenses
+            .filter(
+              (item) =>
+                dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
+            )
+            .reduce((sum, item) => sum + item.amount, 0)
+        : 0,
+    [inDrill, drillDayKey, expenses],
+  );
+
+  const chartTitle = useMemo(() => {
+    if (inDrill && drillDayKey) {
+      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
+    }
+    if (period === "day") {
+      return `Today · ${dateLabelFromKey(toIsoDateOnly(now, APP_TIMEZONE))} · ${groupDigits(String(expenses.reduce((sum, item) => sum + item.amount, 0)))}`;
+    }
+    return "";
+  }, [inDrill, drillDayKey, period, now, expenses, drillDayTotal]);
+
+  const effectivePeriodLabel = useMemo(() => {
+    if (inDrill && drillDayKey) {
+      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)}`;
+    }
+    if (!inDrill && period !== "day") {
+      const bucket = summaryRows.find((r) => r.key === selectedKey);
+      if (bucket && bucket.left) {
+        return `${bucket.left} · ${bucket.mid ?? ""}`;
+      }
+    }
+    return periodLabel;
+  }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);
 
   const deleteLabel = (() => {
     const expense = expenses.find((item) => item.id === deleteTarget);
@@ -714,7 +755,7 @@ function AppBody({ logout }: { logout: () => void }) {
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
       <Header
-        periodLabel={periodLabel}
+        periodLabel={effectivePeriodLabel}
         totalLabel={totalLabel}
         trailing={<UserMenu onLogout={logout} onAccountDeleted={logout} />}
       />
@@ -764,6 +805,7 @@ function AppBody({ logout }: { logout: () => void }) {
               buckets={chartBuckets}
               selectedKey={chartSelectedKey}
               onSelect={handleBarSelect}
+              title={chartTitle}
             />
           </div>
 

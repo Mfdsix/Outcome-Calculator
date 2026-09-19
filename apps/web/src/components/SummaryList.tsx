@@ -51,7 +51,7 @@ interface SummaryRowProps {
 function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
   const selected = row.key === selectedKey;
   const rowRef = useScrollSelected(selectedKey);
-  return (
+      return (
     <li key={row.key}>
       <button
         ref={selected ? rowRef : undefined}
@@ -59,19 +59,19 @@ function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
         onClick={() => onSelect(row.key)}
         data-testid={`summary-row-${row.key}`}
         aria-pressed={selected}
-        className={`flex w-full items-center justify-between px-1 py-2.5 text-left transition-colors ${
+        className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-2.5 text-left transition-colors ${
           selected ? "bg-neutral-800/80" : "active:bg-neutral-900"
         }`}
       >
-        <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
+        <span className={`col-span-1 text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
           {row.left}
         </span>
         {row.mid && (
-          <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
+          <span className={`col-span-1 text-right text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
             {row.mid}
           </span>
         )}
-        <span className={`tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
+        <span className={`col-span-1 text-right tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
           {row.right}
         </span>
       </button>

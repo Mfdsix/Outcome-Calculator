@@ -69,7 +69,7 @@ export function Keypad({
       aria-label={spec.aria}
       disabled={disabled || navDisabled?.[direction]}
       onClick={() => onNavigate?.(direction)}
-      className="key-button disabled:opacity-40"
+      className="key-button disabled:opacity-[0.12] disabled:text-neutral-800 active:scale-90 active:brightness-150 transition-all duration-75"
     >
       {label}
     </button>
@@ -83,7 +83,7 @@ export function Keypad({
       aria-label={spec.aria}
       disabled={true}
       onClick={() => {}}
-      className="key-button disabled:opacity-40"
+      className="key-button disabled:opacity-[0.12] disabled:text-neutral-800"
     >
       {label}
     </button>
@@ -111,13 +111,13 @@ export function Keypad({
     <div className="grid grid-cols-3 gap-2 pb-4" data-testid="keypad">
       {specs.map((spec) => renderCell(spec))}
 
-            <button
+      <button
         type="button"
         data-testid="key-0"
         aria-label="Digit 0"
         disabled={isSpecial ? true : disabled}
         onClick={() => (!isSpecial ? onDigit("0") : undefined)}
-        className="key-button disabled:opacity-40"
+        className="key-button disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         0
       </button>
@@ -128,7 +128,7 @@ export function Keypad({
         aria-label="Backspace"
         disabled={isSpecial ? true : disabled}
         onClick={() => onBackspace()}
-        className="key-button text-neutral-300 disabled:opacity-40"
+        className="key-button text-neutral-300 disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         ⌫
       </button>

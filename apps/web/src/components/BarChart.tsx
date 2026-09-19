@@ -7,6 +7,7 @@ export interface BarChartProps {
   buckets: ChartBucket[];
   selectedKey?: string | null;
   onSelect?: (key: string) => void;
+  title?: string;
 }
 
 /**
@@ -15,7 +16,7 @@ export interface BarChartProps {
  * is provided browse selection takes over highlighting. Pure CSS flex bars —
  * no chart library.
  */
-export function BarChart({ buckets, selectedKey, onSelect }: BarChartProps) {
+export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProps) {
   const max = useMemo(
     () => Math.max(1, ...buckets.map((bucket) => bucket.total)),
     [buckets],
@@ -65,6 +66,15 @@ export function BarChart({ buckets, selectedKey, onSelect }: BarChartProps) {
           );
         })}
       </div>
+
+      {title && (
+        <span
+          className="mt-0.5 block text-[10px] text-neutral-400"
+          data-testid="chart-title"
+        >
+          {title}
+        </span>
+      )}
 
       <div className="mt-1 flex gap-[3px]">
         {buckets.map((bucket) => (
