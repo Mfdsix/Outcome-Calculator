@@ -123,12 +123,15 @@ describe("App — budget entry + calculator hygiene", () => {
     expect(screen.queryByTestId("budget-screen")).not.toBeInTheDocument();
   });
 
-  it("no budget → sterile calculator UI (no micro-row) + empty state with CTA", async () => {
+  it("no budget → sterile numbers on the calculator + empty state with CTA", async () => {
     await renderUnlocked();
 
     expect(screen.queryByTestId("budget-micro")).not.toBeInTheDocument();
+    // Insight ticker nags for a budget instead of sterile silence (plan rule 8).
+    expect(await screen.findByTestId("insight-ticker")).toHaveTextContent(
+      "Pasang budget biar ada yang ngingetin.",
+    );
 
-    await screen.findByTestId("keypad");
     const user = userEvent.setup();
     await user.click(screen.getByTestId("budget-open"));
 
@@ -136,15 +139,21 @@ describe("App — budget entry + calculator hygiene", () => {
     expect(screen.queryByTestId("budget-history")).not.toBeInTheDocument(); // hidden, not noisy
   });
 
-  it("active budget → micro-row shows remaining today in the calculator header", async () => {
-    getActiveMock.mockResolvedValue(activeBudget());
+  it("active budget → insight ticker replaces the micro-row in the calculator header", async () => {
+    // Live list seeds todayTotal; the ticker derives remaining from it.
+    listMock.mockResolvedValue({
+      expenses: [{ id: "e1", amount: 35_000, occurredAt: new Date().toISOString() }],
+      total: 35_000,
+    });
+    // Dates must include today (2026-09-19) — otherwise the ticker says "upcoming".
+    getActiveMock.mockResolvedValue(
+      activeBudget({ startDate: "2026-09-01", endDate: "2026-09-30" }),
+    );
     await renderUnlocked();
 
-    const micro = await screen.findByTestId("budget-micro");
-    expect(micro).toHaveTextContent("Sisa hari ini:");
-    expect(micro).toHaveTextContent("Rp65.000");
-    // Right side is the spent/cap pair (abbreviated only ≥ 1jt → full here).
-    expect(micro).toHaveTextContent("Rp35.000 / Rp100.000");
+    const ticker = await screen.findByTestId("insight-ticker");
+    expect(ticker).toHaveTextContent("Sisa Rp65rb hari ini, santai.");
+    expect(ticker).not.toHaveTextContent("Rp35.000 / Rp100.000"); // spent/cap pair moved off the ticker
   });
 });
 
@@ -274,7 +283,7 @@ describe("App — post-Enter budget toast (plan §3)", () => {
   it("Enter that crosses 80% → amber toast + Enter blink, amount still saved", async () => {
     getActiveMock.mockResolvedValue(activeBudget({ status: "warning", progressPct: 85 }));
     const user = await renderUnlocked();
-    await screen.findByTestId("budget-micro");
+    await screen.findByTestId("insight-ticker");
 
     await user.click(screen.getByTestId("key-5"));
     await user.click(screen.getByTestId("key-enter"));
@@ -289,7 +298,7 @@ describe("App — post-Enter budget toast (plan §3)", () => {
   it("Enter that goes over → red 'Melebihi budget' toast + blink", async () => {
     getActiveMock.mockResolvedValue(activeBudget({ status: "over", progressPct: 120 }));
     const user = await renderUnlocked();
-    await screen.findByTestId("budget-micro");
+    await screen.findByTestId("insight-ticker");
 
     await user.click(screen.getByTestId("key-5"));
     await user.click(screen.getByTestId("key-enter"));
@@ -303,7 +312,7 @@ describe("App — post-Enter budget toast (plan §3)", () => {
   it("status ok → no toast, no blink (zero noise)", async () => {
     getActiveMock.mockResolvedValue(activeBudget()); // ok
     const user = await renderUnlocked();
-    await screen.findByTestId("budget-micro");
+    await screen.findByTestId("insight-ticker");
 
     await user.click(screen.getByTestId("key-5"));
     await user.click(screen.getByTestId("key-enter"));

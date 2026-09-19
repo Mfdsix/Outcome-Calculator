@@ -5,11 +5,12 @@ import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTi
 import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
-import { BudgetProgress } from "../components/BudgetProgress";
 import { BudgetScreen } from "../components/BudgetScreen";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { EditActions } from "../components/EditActions";
 import { Header } from "../components/Header";
+import { InsightScreen } from "../components/InsightScreen";
+import { InsightTicker } from "../components/InsightTicker";
 import { Keypad } from "../components/Keypad";
 import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
@@ -21,6 +22,7 @@ import { UserMenu } from "../components/UserMenu";
 import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
+import { useInsights } from "../hooks/useInsights";
 import {
   ApiError,
   UnauthorizedError,
@@ -246,6 +248,17 @@ function AppBody({ logout }: { logout: () => void }) {
   const calc = useCalculator();
   const budget = useBudget();
   const { getStatusNow } = budget;
+
+  /** Today's civil-day total (Jakarta) from the live list — optimistic and
+   * offline-cache friendly; feeds the insight engine with zero fetches. */
+  const todayTotal = useMemo(() => {
+    const { from, to } = currentPeriodRange("day");
+    return expenses.reduce((sum, item) => {
+      const at = new Date(item.occurredAt).getTime();
+      return at >= from.getTime() && at < to.getTime() ? sum + item.amount : sum;
+    }, 0);
+  }, [expenses]);
+  const { insights } = useInsights(budget.active, todayTotal);
   const [flash, setFlash] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
@@ -261,6 +274,7 @@ function AppBody({ logout }: { logout: () => void }) {
 
   const isSpecial = viewMode === "special";
   const isBudget = viewMode === "budget";
+  const isInsight = viewMode === "insight";
   const inDrill = specialPanel === "drill";
 
   const showError = useCallback((message: string) => {
@@ -611,6 +625,14 @@ function AppBody({ logout }: { logout: () => void }) {
     setViewModeExternal("calculator");
   }, [setViewModeExternal]);
 
+  const openInsight = useCallback(() => {
+    setViewModeExternal("insight");
+  }, [setViewModeExternal]);
+
+  const closeInsight = useCallback(() => {
+    setViewModeExternal("calculator");
+  }, [setViewModeExternal]);
+
   const handleBudgetCreate = useCallback(
     async (payload: { type: "full" | "daily"; amount: number; startDate: string; endDate: string }) =>
       budget.createBudget(payload),
@@ -628,9 +650,13 @@ function AppBody({ logout }: { logout: () => void }) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
 
-      if (isBudget) {
-        // Budget screen: Escape returns to the calculator; digits stay inert.
-        if (event.key === "Escape") closeBudget();
+      if (isBudget || isInsight) {
+        // Budget / insight screen: Escape returns to the calculator; digits
+        // stay inert (insight is never an edit origin).
+        if (event.key === "Escape") {
+          if (isBudget) closeBudget();
+          else closeInsight();
+        }
         return;
       }
 
@@ -698,6 +724,7 @@ function AppBody({ logout }: { logout: () => void }) {
     calc,
     isSpecial,
     isBudget,
+    isInsight,
     inDrill,
     handleNavigate,
     handleSpecialEnter,
@@ -705,6 +732,7 @@ function AppBody({ logout }: { logout: () => void }) {
     exitDrill,
     closeHistory,
     closeBudget,
+    closeInsight,
   ]);
 
   /** Clicking a chart bar: in day mode resolve to the first transaction in
@@ -815,6 +843,30 @@ function AppBody({ logout }: { logout: () => void }) {
                 <circle cx="16.5" cy="12" r="0.5" fill="currentColor" />
               </svg>
             </button>
+            <button
+              type="button"
+              aria-label="Lihat insight"
+              data-testid="insight-open"
+              onClick={openInsight}
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-900/60 text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {/* Info icon (i in a circle) — same border pattern as wallet */}
+                <circle cx="12" cy="12" r="9" />
+                <line x1="12" y1="10.5" x2="12" y2="16.5" />
+                <circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
+              </svg>
+            </button>
             <UserMenu onLogout={logout} onAccountDeleted={logout} />
           </>
         }
@@ -855,18 +907,17 @@ function AppBody({ logout }: { logout: () => void }) {
           onCreate={handleBudgetCreate}
           onRemove={handleBudgetRemove}
         />
+      ) : isInsight ? (
+        <InsightScreen
+          insights={insights}
+          hasBudget={budget.active !== null}
+          onBack={closeInsight}
+          onOpenBudget={openBudget}
+        />
       ) : (
         <>
-          {!isSpecial && budget.active && (
-            <BudgetProgress
-              variant="micro"
-              type={budget.active.type}
-              amount={budget.active.amount}
-              spent={budget.active.todaySpent}
-              remaining={budget.active.remaining}
-              status={budget.active.status}
-              progressPct={budget.active.progressPct}
-            />
+          {!isSpecial && (
+            <InsightTicker insights={insights} onOpen={openInsight} />
           )}
 
           <PeriodSelector

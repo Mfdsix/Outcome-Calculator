@@ -9,8 +9,10 @@ export type Period = "day" | "week" | "month";
  *   selected bucket.
  * - "budget": dedicated budget screen (plan §3) — active card + history
  *   ("Pakai lagi") + create form. Digits stay inert; keypad never blocked.
+ * - "insight": dedicated insight screen (plan "Insight Kecil") — the full
+ *   insight list + CTA. Same contract as budget: digits inert, keypad open.
  */
-export type ViewMode = "calculator" | "special" | "budget";
+export type ViewMode = "calculator" | "special" | "budget" | "insight";
 
 /** Where the special browse list currently is. */
 export type SpecialPanel = "summary" | "drill";

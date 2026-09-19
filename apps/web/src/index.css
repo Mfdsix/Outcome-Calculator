@@ -53,6 +53,21 @@ body {
   }
 }
 
+@keyframes insight-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-insight-fade {
+  animation: insight-fade 0.35s ease-out;
+}
+
 @keyframes shake {
   0%,
   100% {
