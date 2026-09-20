@@ -16,7 +16,6 @@
   "dependencies": {
     "@expense-app/shared": "*",
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-sql": "^2.4.1",
     "idb-keyval": "^6.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

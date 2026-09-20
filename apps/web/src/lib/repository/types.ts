@@ -6,17 +6,14 @@ import type {
 } from "@expense-app/shared";
 
 /**
- * Expense persistence contract (Tauri migration plan §5).
+ * Expense persistence contract.
  *
- * The UI depends on this interface only — never on Tauri APIs or on the HTTP
- * client. Two implementations exist:
- * - `httpExpenseRepository` — the web app's API-backed repository (auth +
- *   server-side scoping apply; offline goes through the IDB outbox).
- * - `localExpenseRepository` — the native app's SQLite repository (Tauri
- *   plugin, bundled; the database IS the source of truth).
+ * The UI depends on this interface only — never on the HTTP client. The one
+ * implementation is `httpExpenseRepository`: the API-backed repository (auth
+ * + server-side scoping apply; offline goes through the IDB outbox).
  *
- * A future `syncRepository` can implement the same interface (plan §19)
- * without touching a single component or hook.
+ * A future repository (e.g. a sync-aware adapter) can implement the same
+ * interface without touching a single component or hook.
  */
 export interface ExpenseRepository {
   /** List expenses in the half-open [from, to) range, newest first. */
@@ -29,4 +26,4 @@ export interface ExpenseRepository {
 }
 
 /** Which backend the UI is wired to in this runtime. */
-export type RepositoryKind = "local" | "http";
+export type RepositoryKind = "http";

@@ -12,8 +12,23 @@ import type {
  * Single API abstraction (spec §26). Components never call fetch directly;
  * swap the backend by changing only this file.
  */
+import { IS_TAURI } from "./tauri";
 
+/**
+ * Base URL: relative (same-origin `/api` behind the dev proxy / reverse
+ * proxy) by default. The native Tauri shell has no origin to proxy from, so
+ * it reads VITE_API_URL from `.env.tauri` (loaded via `--mode tauri`, see
+ * package.json tauri:dev/tauri:build) and talks to the API server over the
+ * LAN. VITE_API_URL keeps working for browser builds too (e.g. Docker).
+ */
 const baseUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+
+/** Native shell guard: a missing VITE_API_URL would silently break every request. */
+if (IS_TAURI && !baseUrl) {
+  console.error(
+    "[api] VITE_API_URL is not set — native build cannot reach the API server.",
+  );
+}
 
 const TOKEN_KEY = "expense-app.token";
 const LAST_VISIT_KEY = "expense-app.last-visit";

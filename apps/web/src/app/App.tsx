@@ -25,7 +25,6 @@ import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
 import { useInsights } from "../hooks/useInsights";
-import { useLocalLockFlow } from "../hooks/useLocalLockFlow";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
 import {
@@ -38,7 +37,6 @@ import {
   setAuthToken,
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
-import { IS_TAURI } from "../lib/tauri";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
@@ -100,14 +98,9 @@ function isOfflineCause(cause: unknown): boolean {
  * Header reflects online state + sync progress.
  */
 export default function App() {
-  // Dual lock flows (Tauri plan §3): the browser build authenticates against
-  // the API; the native build uses the local PIN screen gate. Both hooks are
-  // called unconditionally (rules of hooks); the unused one stays inert —
-  // useLockFlow has no token to refresh in Tauri, useLocalLockFlow no-ops
-  // outside Tauri.
-  const webLock = useLockFlow();
-  const nativeLock = useLocalLockFlow();
-  const lock = IS_TAURI ? nativeLock : webLock;
+  // Online-first: every runtime (browser PWA + Tauri) authenticates against
+  // the API with the same PIN → server-issued token flow.
+  const lock = useLockFlow();
 
   // Sync the persisted theme onto <html> (main.tsx pre-paints; this keeps the
   // class correct if storage changed while the tab stayed open).
@@ -1218,20 +1211,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         periodLabel={effectivePeriodLabel}
         totalLabel={totalLabel}
         status={
-          IS_TAURI ? null : (
-            <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
-          )
+          <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
         }
         trailing={
-          // The menu stays in the native build too (theme toggle + Keluar
-          // locks the screen); server-only items hide via `localOnly`.
           <UserMenu
             onLogout={logout}
             onAccountDeleted={logout}
             budgetStatus={budget.active?.status ?? null}
             onOpenBudget={openBudget}
             onOpenInsight={openInsight}
-            localOnly={IS_TAURI}
           />
         }
       />

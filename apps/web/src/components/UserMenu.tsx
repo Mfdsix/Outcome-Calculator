@@ -17,12 +17,6 @@ export interface UserMenuProps {
   onOpenBudget: () => void;
   /** Opens the insight screen. */
   onOpenInsight: () => void;
-  /**
-   * Native (Tauri) build: budgets, insight, and account deletion are
-   * server-backed features — hidden. Theme toggle and "Keluar" (screen lock)
-   * stay; the PIN row still shows the local gate's mask.
-   */
-  localOnly?: boolean;
 }
 
   /**
@@ -33,7 +27,7 @@ export interface UserMenuProps {
    * owned by this component. Closes via tap-outside, Escape, or after
    * logout/deletion.
    */
-export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudget, onOpenInsight, localOnly = false }: UserMenuProps) {
+export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudget, onOpenInsight }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -131,7 +125,6 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
           </div>
           <div className="mx-3 border-t border-neutral-800" />
 
-          {!localOnly && (
           <button
             type="button"
             role="menuitem"
@@ -170,9 +163,7 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
               />
             )}
           </button>
-          )}
 
-          {!localOnly && (
           <button
             type="button"
             role="menuitem"
@@ -200,7 +191,6 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
             </svg>
             Insight
           </button>
-          )}
 
           <div className="mx-3 my-1 border-t border-neutral-800" />
 
@@ -269,7 +259,6 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
 
           <div className="mx-3 my-1 border-t border-neutral-800" />
 
-          {!localOnly && (
           <button
             type="button"
             role="menuitem"
@@ -300,7 +289,6 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
             </svg>
             Hapus akun
           </button>
-          )}
           <button
             type="button"
             role="menuitem"

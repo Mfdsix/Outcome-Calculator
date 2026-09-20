@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 
+import { IS_TAURI } from "../lib/tauri";
+
 /**
  * Small dismissible banner prompting the user to reload when a new service
  * worker has finished installing (registerType: "prompt" in vite.config).
+ * Skipped in the Tauri shell: assets are bundled into the app binary, so
+ * there is no service worker (and nothing to update) in that runtime.
  */
 export function UpdateBanner() {
   const [waiting, setWaiting] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    if (IS_TAURI) return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     let cancelled = false;
 

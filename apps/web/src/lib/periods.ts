@@ -2,14 +2,11 @@ import {
   dayRange,
   last30DaysRange,
   last7DaysRange,
-  monthRange,
   toIsoWithOffset,
-  weekRange,
 } from "@expense-app/shared";
 import type { PeriodRange } from "@expense-app/shared";
 
 import type { Period } from "../types/ui";
-import { IS_TAURI } from "./tauri";
 
 /** Browser-safe default; aggregation authority remains the server (spec §5). */
 export const APP_TIMEZONE = "Asia/Jakarta";
@@ -31,26 +28,11 @@ export function toIsoDateOnly(now: Date = new Date(), tz = APP_TIMEZONE): string
 }
 
 /**
- * Calendar periods (Tauri migration plan §9): W = Monday→next Monday,
- * M = first day of the month → first day of the next month. All half-open
- * [from, to) in Asia/Jakarta. Exported for tests.
+ * Rolling windows (web spec §5): W = last 7 days, M = last 30 days. All
+ * half-open [from, to) in Asia/Jakarta. The server remains the aggregation
+ * authority — these mirror its windows client-side.
  */
-export function calendarPeriodRange(period: Period, now: Date = new Date()): PeriodRange {
-  switch (period) {
-    case "day":
-      return dayRange(now, APP_TIMEZONE);
-    case "week":
-      return weekRange(now, APP_TIMEZONE);
-    case "month":
-      return monthRange(now, APP_TIMEZONE);
-  }
-}
-
-/** Half-open [from, to) ISO range for the period containing `now`. */
 export function currentPeriodRange(period: Period, now: Date = new Date()): PeriodRange {
-  // Web spec §5 uses rolling windows for W/M; the native app follows the
-  // Tauri plan §9 calendar semantics. Day is the calendar day in both.
-  if (IS_TAURI) return calendarPeriodRange(period, now);
   switch (period) {
     case "day":
       return dayRange(now, APP_TIMEZONE);
