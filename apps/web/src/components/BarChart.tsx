@@ -1,5 +1,3 @@
-import { useMemo } from "react";
-
 import { formatIDRAbbreviated } from "../lib/currency";
 import type { ChartBucket } from "../lib/chart";
 
@@ -17,12 +15,10 @@ export interface BarChartProps {
  * no chart library.
  */
 export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProps) {
-  const max = useMemo(
-    () => Math.max(1, ...buckets.map((bucket) => bucket.total)),
-    [buckets],
-  );
-
   if (buckets.length === 0) return null;
+
+  const max = Math.max(0, ...buckets.map((bucket) => bucket.total));
+  const hasData = max > 0;
 
   const granularityLabel = buckets[0]?.kind === "hour" ? "Per jam" : "Per hari";
 
@@ -30,12 +26,16 @@ export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProp
     <div className="mb-3 rounded-xl border border-neutral-800 bg-neutral-900/50 px-3 pb-2 pt-3" data-testid="bar-chart">
       <div className="mb-2 flex items-baseline justify-between">
         <span className="text-[11px] uppercase tracking-widest text-neutral-500">{granularityLabel}</span>
-        <span className="text-[11px] text-neutral-500">Puncak {formatIDRAbbreviated(max)}</span>
+        {hasData ? (
+          <span className="text-[11px] text-neutral-500">Puncak {formatIDRAbbreviated(max)}</span>
+        ) : (
+          <span aria-hidden="true" />
+        )}
       </div>
 
       <div className="flex h-24 items-end gap-[3px]" role="img" aria-label={`Pengeluaran ${granularityLabel.toLowerCase()}`}>
         {buckets.map((bucket) => {
-          const heightPct = Math.max(3, Math.round((bucket.total / max) * 100));
+          const heightPct = hasData ? Math.max(3, Math.round((bucket.total / max) * 100)) : 3;
           const highlighted = selectedKey ? bucket.key === selectedKey : bucket.isCurrent;
           return (
             <button

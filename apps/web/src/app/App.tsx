@@ -41,7 +41,7 @@ import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
-import { APP_TIMEZONE, currentPeriodRange, toIsoDateOnly } from "../lib/periods";
+import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
 import { applyTheme } from "../lib/theme";
 import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
@@ -336,6 +336,9 @@ function AppBody({ logout }: { logout: () => void }) {
   const isSpecial = viewMode === "special";
   const isBudget = viewMode === "budget";
   const isInsight = viewMode === "insight";
+  // Plain calculator screen: budget/insight/special history own the full body
+  // and must not share the row with the period strip or amount input.
+  const isHomeScreen = !isSpecial && !isBudget && !isInsight;
 
   // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
 
@@ -1183,9 +1186,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     if (inDrill && drillDayKey) {
       return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
     }
-    if (period === "day") {
-      return `Today · ${dateLabelFromKey(toIsoDateOnly(now, APP_TIMEZONE))} · ${groupDigits(String(expenses.reduce((sum, item) => sum + item.amount, 0)))}`;
-    }
+    // Day hourly chart: the header already anchors to "Per jam" — the Today/total
+    // subtitle is redundant, so we leave it blank here.
     return "";
   }, [inDrill, drillDayKey, period, now, expenses, drillDayTotal]);
 
@@ -1248,16 +1250,18 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         </div>
       )}
 
-      <PeriodSelector
-        highlight={isSpecial ? period : null}
-        onOpen={openHistory}
-        onActiveTap={inDrill ? exitDrill : closeHistory}
-        disabledVisual={online ? [] : ["week", "month"]}
-      />
+      {!isBudget && !isInsight && (
+        <PeriodSelector
+          highlight={isSpecial ? period : null}
+          onOpen={openHistory}
+          onActiveTap={inDrill ? exitDrill : closeHistory}
+          disabledVisual={online ? [] : ["week", "month"]}
+        />
+      )}
 
-      {!isSpecial && (
+      {isHomeScreen && (
         <>
-          {!isSpecial && insightTickerVisible && (
+          {insightTickerVisible && (
             <InsightTicker insights={insights} onOpen={openInsight} />
           )}
 

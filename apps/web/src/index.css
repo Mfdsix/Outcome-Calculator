@@ -22,6 +22,16 @@ html.dark {
 
 html.light {
   color-scheme: light;
+  /* Tailwind v4 paints neutral-* via CSS vars (--color-neutral-*). The defaults
+     are dark-tinted, so pseudo-class utilities like `active:bg-neutral-800`
+     (emitted as `background-color: var(--color-neutral-800)`) stayed black even
+     under the `html.light .bg-neutral-800 { !important }` class override
+     (the override targets the static `.bg-neutral-800` selector, not the
+     `:active` variant). Remapping the vars here makes every neutral-800/900
+     utility — base, hover, active, borders, text — light in one place. */
+  --color-neutral-800: #DEE2E6;
+  --color-neutral-900: #F1F3F5;
+  --color-neutral-700: #DEE2E6;
   --app-bg: #F8F9FA;
   --app-fg: #212529;
   --key-text: #212529;
@@ -137,6 +147,17 @@ html.light {
   html.light .divide-neutral-900\/80 > :not([hidden]) ~ :not([hidden]),
   html.light .divide-neutral-800\/80 > :not([hidden]) ~ :not([hidden]) {
     border-color: #DEE2E6 !important;
+  }
+  /* Shadows: Tailwind emits blackish shadows (rgb(0 0 0 / 0.5)) that read as a
+     hard black halo on light surfaces. Remap them to soft ambient shadows. */
+  html.light .shadow-xl {
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.04), 0 4px 6px -2px rgb(0 0 0 / 0.02) !important;
+  }
+  html.light .shadow-lg {
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.03), 0 4px 6px -2px rgb(0 0 0 / 0.01) !important;
+  }
+  html.light .shadow {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.02) !important;
   }
   html.light .border-neutral-900,
   html.light .border-neutral-900\/70,
