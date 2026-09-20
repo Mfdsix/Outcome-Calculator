@@ -25,7 +25,7 @@ export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSele
 
   return (
     <ul
-      className="min-h-0 flex-1 divide-y divide-neutral-800/80 overflow-y-auto"
+      className="min-h-0 flex-1 divide-y-0 overflow-y-auto"
       data-testid="summary-list"
     >
       {rows.map((row) => {

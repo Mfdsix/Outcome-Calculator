@@ -24,7 +24,7 @@ export interface BrowseListProps {
 export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect }: BrowseListProps) {
   return (
     <ul
-      className="min-h-0 flex-1 divide-y divide-neutral-800/80 overflow-y-auto"
+      className="min-h-0 flex-1 divide-y-0 overflow-y-auto"
       data-testid="browse-list"
     >
       {rows.map((row) => {
