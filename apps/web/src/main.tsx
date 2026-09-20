@@ -12,3 +12,16 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+
+// PWA (plan §3): production-only service worker registration. In dev/tests
+// the virtual module is absent and nothing happens.
+if (import.meta.env.PROD) {
+  void import("virtual:pwa-register").then(({ registerSW }) => {
+    registerSW({
+      immediate: true,
+      onNeedRefresh: () => {
+        // UpdateBanner listens to the waiting worker itself; nothing to do here.
+      },
+    });
+  });
+}

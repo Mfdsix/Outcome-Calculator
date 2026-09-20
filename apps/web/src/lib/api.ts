@@ -70,6 +70,27 @@ export class ApiError extends Error {
 /** Thrown when a request fails due to auth; the app reacts by locking. */
 export class UnauthorizedError extends Error {}
 
+/**
+ * Network-level failure (fetch threw / offline). Status is always 0 so
+ * callers can distinguish "offline, keep optimistic state + enqueue" from
+ * a real API error.
+ */
+export class OfflineError extends ApiError {
+  constructor(message = "Tidak ada koneksi. Perubahan disimpan sementara di perangkat ini.") {
+    super(0, message);
+    this.name = "OfflineError";
+  }
+}
+
+/** Best-effort connectivity probe; only navigator.onLine, verified live. */
+export function isOnline(): boolean {
+  try {
+    return typeof navigator === "undefined" ? true : navigator.onLine !== false;
+  } catch {
+    return true;
+  }
+}
+
 let authToken: string | null = loadToken();
 
 export function setAuthToken(token: string | null): void {
@@ -90,7 +111,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   } catch {
-    throw new ApiError(0, "Could not save expense.\nTry again.");
+    throw new OfflineError();
   }
 
   if (response.status === 401) {
@@ -223,8 +244,14 @@ export const budgetsApi = {
 };
 
 export const expensesApi = {
-  list(from: string, to: string): Promise<ExpenseListResponse> {
+  /**
+   * List expenses in the half-open [from, to) range. `occurredAt` is an
+   * optional marker datetime (offset string) used by the offline layer to
+   * bind a cached day to the server's authoritative period boundaries.
+   */
+  list(from: string, to: string, occurredAt?: string): Promise<ExpenseListResponse> {
     const query = new URLSearchParams({ from, to });
+    if (occurredAt) query.set("occurredAt", occurredAt);
     return request<ExpenseListResponse>(`/api/expenses?${query.toString()}`);
   },
 

@@ -1,7 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import "fake-indexeddb/auto";
 
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+
+import { clearAllOfflineData } from "../lib/offlineDb";
 
 const store = new Map<string, string>();
 
@@ -39,7 +42,9 @@ Object.defineProperties(globalThis, {
   },
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   store.clear();
+  // Fresh offline layer per test (IDB cache + outbox isolation).
+  await clearAllOfflineData();
 });

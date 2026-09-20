@@ -1,0 +1,22 @@
+{
+  "name": "Pengeluaran — Kalkulator Harian",
+  "short_name": "Pengeluaran",
+  "description": "Catat pengeluaran harian sekencang kalkulator. Bisa dipakai offline untuk hari ini.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    { "src": "/icons/pwa-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/pwa-512.png", "sizes": "512x512", "type": "image/png" },
+    {
+      "src": "/icons/pwa-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

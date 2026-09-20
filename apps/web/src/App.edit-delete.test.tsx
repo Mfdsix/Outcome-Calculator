@@ -29,11 +29,19 @@ vi.mock("./lib/api", () => {
       }
     },
     UnauthorizedError: class UnauthorizedError extends Error {},
+    OfflineError: class OfflineError extends Error { status = 0; constructor() { super("offline"); this.name = "OfflineError"; } },
+    isOnline: vi.fn(() => true),
+    loadToken: vi.fn((): string | null => null),
     readLastVisit: vi.fn(() => 0),
     writeLastVisit: vi.fn(),
     setAuthToken: vi.fn(),
   };
 });
+
+vi.mock("../hooks/useOnline", () => ({ useOnline: () => true }));
+vi.mock("../hooks/useSync", () => ({ useSync: () => ({ pending: 0, syncing: false }) }));
+vi.mock("../lib/offlineDb", () => ({ mutateOutbox: vi.fn(), mutateTodayCache: vi.fn() }));
+vi.mock("../lib/sync", () => ({ queueOfflineCreate: vi.fn(), queueOfflineDelete: vi.fn(), queueOfflineUpdate: vi.fn() }));
 
 const listMock = vi.mocked(expensesApi.list);
 const updateMock = vi.mocked(expensesApi.update);
