@@ -39,8 +39,10 @@ import {
 } from "../lib/api";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
+import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
-import { APP_TIMEZONE, currentPeriodRange, toIsoDateOnly } from "../lib/periods";
+import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
+import { applyTheme } from "../lib/theme";
 import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
@@ -97,6 +99,12 @@ function isOfflineCause(cause: unknown): boolean {
  */
 export default function App() {
   const lock = useLockFlow();
+
+  // Sync the persisted theme onto <html> (main.tsx pre-paints; this keeps the
+  // class correct if storage changed while the tab stayed open).
+  useEffect(() => {
+    applyTheme();
+  }, []);
 
   if (!lock.unlocked) {
     return (
@@ -328,6 +336,9 @@ function AppBody({ logout }: { logout: () => void }) {
   const isSpecial = viewMode === "special";
   const isBudget = viewMode === "budget";
   const isInsight = viewMode === "insight";
+  // Plain calculator screen: budget/insight/special history own the full body
+  // and must not share the row with the period strip or amount input.
+  const isHomeScreen = !isSpecial && !isBudget && !isInsight;
 
   // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
 
@@ -429,18 +440,6 @@ function AppBody({ logout }: { logout: () => void }) {
       setEnterFlash(false);
     }, 3000);
   }, [getStatusNow]);
-
-  /** Transaction-facing modes (day summary + drill) default to the newest row;
-   * otherwise no auto-selection. Drop a selection that no longer resolves to
-   * a live expense.
-   */
-  useEffect(() => {
-    const isTxMode = inDrill || period === "day";
-    if (!isTxMode || expenses.length === 0) return;
-    if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
-      setSelectedKey(expenses[0]?.id ?? null);
-    }
-  }, [expenses, inDrill, period, selectedKey, setSelectedKey]);
 
   /** In drill mode the transaction-facing selection lives in a second slot
    * so the bucket selection (chart) is preserved for when we go back up. */
@@ -786,6 +785,14 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return selectedKey;
   }, [inDrill, period, selectedKey, expenses, drillDayKey]);
 
+  /**
+   * Day keys for W/M summary navigation, in the same descending order the sparse
+   * SummaryList renders (newest first). Using this (instead of chartBuckets)
+   * keeps selection + up/down + disabled state aligned to the rows actually
+   * shown, so the highlight never vanishes on a zero-data day.
+   */
+  const navDayKeys = useMemo(() => groupExpensesByDay(expenses).map((d) => d.key), [expenses]);
+
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
       if (expenses.length === 0) return;
@@ -821,28 +828,28 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             moveTransactionSelection(direction);
             return;
           }
-          if (period === "day") {
-            moveTransactionSelection(direction);
-            return;
-          }
-          const keys = chartBuckets.map((bucket) => bucket.key);
-          if (keys.length === 0) return;
-          const index = keys.indexOf(selectedKey ?? "");
-          const valid = index < 0 ? 0 : index;
-          const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
-          setSelectedKey(keys[next] ?? null);
-          return;
-        }
-      }
-    },
-    [openHistory, period, inDrill, moveTransactionSelection, chartBuckets, selectedKey, setSelectedKey],
-  );
+           if (period === "day") {
+             moveTransactionSelection(direction);
+             return;
+           }
+            const keys = navDayKeys;
+            if (keys.length === 0) return;
+           const index = keys.indexOf(selectedKey ?? "");
+           const valid = index < 0 ? 0 : index;
+           const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
+           setSelectedKey(keys[next] ?? null);
+           return;
+         }
+       }
+     },
+     [openHistory, period, inDrill, moveTransactionSelection, navDayKeys, selectedKey, setSelectedKey],
+   );
 
   const navDisabled = useMemo<Partial<Record<"up" | "down" | "left" | "right", boolean>>>(() => {
     const domainKeys =
       inDrill || period === "day"
         ? expenses.map((e) => e.id)
-        : chartBuckets.map((b) => b.key);
+        : navDayKeys;
 
     if (domainKeys.length === 0) {
       return {
@@ -1007,18 +1014,23 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       if (isSpecial) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
+          triggerClicky(keyEl("key-2"));
           handleNavigate("up");
         } else if (event.key === "ArrowDown") {
           event.preventDefault();
+          triggerClicky(keyEl("key-8"));
           handleNavigate("down");
         } else if (event.key === "ArrowLeft") {
           event.preventDefault();
+          triggerClicky(keyEl("key-4"));
           handleNavigate("left");
         } else if (event.key === "ArrowRight") {
           event.preventDefault();
+          triggerClicky(keyEl("key-6"));
           handleNavigate("right");
         } else if (event.key === "Enter") {
           event.preventDefault();
+          triggerClicky(keyEl("key-enter"));
           handleSpecialEnter();
         }
         return;
@@ -1026,12 +1038,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
+        triggerClicky(keyEl(digitKeyTestId(event.key)));
         calc.pressDigit(event.key);
       } else if (event.key === "Backspace") {
         event.preventDefault();
+        triggerClicky(keyEl("key-backspace"));
         calc.pressBackspace();
       } else if (event.key === "Enter") {
         event.preventDefault();
+        triggerClicky(keyEl("key-enter"));
         void handleEnter();
       }
     };
@@ -1127,6 +1142,33 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     }));
   }, [inDrill, period, expenses, pendingIds, now]);
 
+  /** Auto-selection policy per view mode:
+   *  - transaction-facing (day summary + drill): newest row first.
+   *  - bucket-facing (W/M summary): seed the most-recent day that actually has
+   *    data (first row of the sparse summary list) so the highlight is always
+   *    visible; fall back to today's chart day, then the first bucket.
+   *  Selection is (re)seeded on entry/refresh; navigation keeps it within the
+   *  bucket set so it isn't clobbered here. */
+  useEffect(() => {
+    if (expenses.length === 0) return;
+    if (inDrill || period === "day") {
+      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
+        setSelectedKey(expenses[0]?.id ?? null);
+      }
+      return;
+    }
+    const seed =
+      summaryRows[0]?.key ??
+      chartBuckets.find((bucket) => bucket.isCurrent)?.key ??
+      chartBuckets[0]?.key ??
+      null;
+    // Drop a selection that is no longer present in the rendered (sparse) list
+    // — avoids a stale key that highlights a bar but no SummaryList row.
+    if (selectedKey === null || !summaryRows.some((row) => row.key === selectedKey)) {
+      setSelectedKey(seed);
+    }
+  }, [expenses, inDrill, period, selectedKey, chartBuckets, summaryRows, setSelectedKey]);
+
   const drillDayTotal = useMemo(
     () =>
       inDrill && drillDayKey
@@ -1144,9 +1186,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     if (inDrill && drillDayKey) {
       return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
     }
-    if (period === "day") {
-      return `Today · ${dateLabelFromKey(toIsoDateOnly(now, APP_TIMEZONE))} · ${groupDigits(String(expenses.reduce((sum, item) => sum + item.amount, 0)))}`;
-    }
+    // Day hourly chart: the header already anchors to "Per jam" — the Today/total
+    // subtitle is redundant, so we leave it blank here.
     return "";
   }, [inDrill, drillDayKey, period, now, expenses, drillDayTotal]);
 
@@ -1209,16 +1250,18 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         </div>
       )}
 
-      <PeriodSelector
-        highlight={isSpecial ? period : null}
-        onOpen={openHistory}
-        onActiveTap={inDrill ? exitDrill : closeHistory}
-        disabledVisual={online ? [] : ["week", "month"]}
-      />
+      {!isBudget && !isInsight && (
+        <PeriodSelector
+          highlight={isSpecial ? period : null}
+          onOpen={openHistory}
+          onActiveTap={inDrill ? exitDrill : closeHistory}
+          disabledVisual={online ? [] : ["week", "month"]}
+        />
+      )}
 
-      {!isSpecial && (
+      {isHomeScreen && (
         <>
-          {!isSpecial && insightTickerVisible && (
+          {insightTickerVisible && (
             <InsightTicker insights={insights} onOpen={openInsight} />
           )}
 

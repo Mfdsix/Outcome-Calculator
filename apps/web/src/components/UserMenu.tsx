@@ -4,6 +4,7 @@ import type { BudgetStatus } from "@expense-app/shared";
 
 import { DeleteAccountDialog } from "./DeleteAccountDialog";
 import { ApiError, authApi } from "../lib/api";
+import { useTheme } from "../hooks/useTheme";
 
 export interface UserMenuProps {
   /** Called after the auth token is cleared and the app must re-lock. */
@@ -32,6 +33,7 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { theme, toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     if (!open) return;
@@ -188,6 +190,71 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
               <circle cx="12" cy="7.5" r="0.5" fill="currentColor" />
             </svg>
             Insight
+          </button>
+
+          <div className="mx-3 my-1 border-t border-neutral-800" />
+
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="user-menu-theme"
+            aria-checked={theme === "light"}
+            onClick={() => {
+              setOpen(false);
+              toggleTheme();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-neutral-200 active:bg-neutral-800"
+          >
+            {theme === "light" ? (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="4" />
+                <line x1="12" y1="2" x2="12" y2="4" />
+                <line x1="12" y1="20" x2="12" y2="22" />
+                <line x1="4.9" y1="4.9" x2="6.3" y2="6.3" />
+                <line x1="17.7" y1="17.7" x2="19.1" y2="19.1" />
+                <line x1="2" y1="12" x2="4" y2="12" />
+                <line x1="20" y1="12" x2="22" y2="12" />
+                <line x1="4.9" y1="19.1" x2="6.3" y2="17.7" />
+                <line x1="17.7" y1="6.3" x2="19.1" y2="4.9" />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+              </svg>
+            )}
+            <span className="flex-1">Mode {theme === "light" ? "Terang" : "Gelap"}</span>
+            <span
+              aria-hidden="true"
+              className={`relative inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors ${
+                theme === "light" ? "bg-emerald-600" : "bg-neutral-600"
+              }`}
+            >
+              <span
+                className={`absolute h-3 w-3 rounded-full bg-white transition-transform ${
+                  theme === "light" ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </span>
           </button>
 
           <div className="mx-3 my-1 border-t border-neutral-800" />

@@ -608,8 +608,8 @@ describe("App — user menu", () => {
     expect(del.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(logout.querySelector("svg[aria-hidden='true']")).not.toBeNull();
 
-    // Two dividers: one after PIN, one before delete.
-    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(2);
+    // Three dividers: after PIN, after theme toggle, before delete.
+    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(3);
   });
 
   it("toggling the insight ticker from the insight screen hides it on home", async () => {
@@ -743,6 +743,39 @@ describe("App — history navigation matrix", () => {
     expect(screen.getByTestId("period-month")).toHaveAttribute("aria-current", "true");
   });
 
+  it("switches week/month keeps the first summary row selected (no vanishing highlight)", async () => {
+    // Three distinct days so W/M summary has multiple sparse rows.
+    listMock.mockResolvedValue({
+      expenses: [
+        { id: "r1", amount: 1000, occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString() },
+        { id: "r2", amount: 2000, occurredAt: new Date(Date.now() - 86_400_000).toISOString() },
+        { id: "r3", amount: 3000, occurredAt: new Date().toISOString() },
+      ],
+      total: 6000,
+    });
+    const user = userEvent.setup();
+    await renderUnlocked();
+    await user.click(screen.getByTestId("period-week")); // → history W
+    await screen.findByTestId("summary-list");
+
+    // Helper: exactly one row carries aria-pressed="true".
+    const assertOneSelected = async () => {
+      const rows = screen.getAllByTestId(/^summary-row-/);
+      await vi.waitFor(() => {
+        const pressed = rows.filter((row) => row.getAttribute("aria-pressed") === "true");
+        expect(pressed).toHaveLength(1);
+      });
+    };
+
+    await assertOneSelected(); // W
+    await user.click(screen.getByTestId("period-month")); // → M
+    await screen.findByTestId("summary-list");
+    await assertOneSelected(); // M
+    await user.click(screen.getByTestId("period-week")); // → W lagi
+    await screen.findByTestId("summary-list");
+    await assertOneSelected(); // W repeat — highlight must not vanish
+  });
+
   it("drill right → exits drill into month summary", async () => {
     await seed([{ id: "d1", amount: 35000 }]);
     const user = userEvent.setup();
@@ -775,7 +808,7 @@ describe("App — history navigation matrix", () => {
     // Down enabled at first row.
     expect(screen.getByTestId("key-8")).not.toBeDisabled();
 
-    // Last row selected → down disabled.
+     // Last row selected → down disabled.
     await user.click(screen.getByTestId("summary-row-b"));
     await user.keyboard("{ArrowDown}");
     expect(screen.getByTestId("key-8")).toBeDisabled();

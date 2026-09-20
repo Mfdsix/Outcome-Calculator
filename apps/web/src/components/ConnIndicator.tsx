@@ -58,18 +58,24 @@ export function ConnIndicator({ online, syncing, pending, cached }: ConnIndicato
     };
   }
 
+  const fullyOnline = online && !syncing && pending === 0 && !cached;
+
   return (
     <span
       role="status"
       data-testid="conn-indicator"
       title={state.title}
-      className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] leading-none text-neutral-400"
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] leading-none text-neutral-400 ${
+        fullyOnline ? "gap-0" : "gap-1.5"
+      }`}
     >
       <span
-        aria-hidden="true"
+        aria-hidden={!fullyOnline}
         className={`inline-block size-1.5 rounded-full ${state.color} ${state.pulse ? "animate-pulse" : ""}`}
       />
-      <span data-testid="conn-indicator-label">{state.label}</span>
+      {!fullyOnline && (
+        <span data-testid="conn-indicator-label">{state.label}</span>
+      )}
     </span>
   );
 }

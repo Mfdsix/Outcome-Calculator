@@ -272,10 +272,12 @@ describe("App — offline Today CRUD (plan §4/§6)", () => {
     );
     await setOnline(true);
 
+    // Back online: indicator drops the label (only the green dot remains).
     await vi.waitFor(
-      () => expect(screen.getByTestId("conn-indicator-label")).toHaveTextContent("Online"),
+      () => expect(screen.queryByTestId("conn-indicator-label")).toBeNull(),
       { timeout: 3000 },
     );
+    expect(screen.getByTestId("conn-indicator").querySelector("span")).toHaveClass("bg-emerald-500");
     // Op dropped → outbox empties without a crash.
     await vi.waitFor(async () => expect((await readOutbox(TOKEN)).length).toBe(0), { timeout: 3000 });
   });
@@ -306,22 +308,24 @@ describe("App — Week/Month stay online-only (plan §5)", () => {
 });
 
 describe("App — connection indicator (plan §7)", () => {
-  it("shows Online when connected and Offline after going offline", async () => {
+  it("shows only the green dot when connected (no Online label), Offline label when offline", async () => {
     const user = await renderUnlocked();
-    expect(await screen.findByTestId("conn-indicator-label")).toHaveTextContent("Online");
+    // Connected: label is suppressed, just the green dot remains.
+    expect(screen.queryByTestId("conn-indicator-label")).toBeNull();
+    expect(screen.getByTestId("conn-indicator").querySelector("span")).toHaveClass("bg-emerald-500");
 
     await setOnline(false);
     expect(screen.getByTestId("conn-indicator-label")).toHaveTextContent("Offline");
 
     await setOnline(true);
-    // Drain may briefly flash "Sync…" — wait for it to settle.
-    await vi.waitFor(() => expect(screen.getByTestId("conn-indicator-label")).toHaveTextContent("Online"), {
+    // Drain may briefly flash "Sync..." — wait for the label to disappear.
+    await vi.waitFor(() => expect(screen.queryByTestId("conn-indicator-label")).toBeNull(), {
       timeout: 3000,
     });
-    void user;
-  });
+     void user;
+   });
 
-  it("dims W/M buttons while offline (disabledVisual)", async () => {
+   it("dims W/M buttons while offline (disabledVisual)", async () => {
     const user = await renderUnlocked();
     await setOnline(false);
     expect(screen.getByTestId("period-week").className).toContain("text-neutral-600");
