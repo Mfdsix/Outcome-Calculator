@@ -57,8 +57,8 @@ export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProp
                   highlighted
                     ? "bg-emerald-500"
                     : bucket.total > 0
-                      ? "bg-neutral-600 group-hover:bg-neutral-500"
-                      : "bg-neutral-800"
+                      ? "bg-[var(--bar-fill)] group-hover:brightness-110"
+                      : "bg-[var(--bar-zero)]"
                 }`}
                 style={{ height: `${heightPct}%` }}
               />

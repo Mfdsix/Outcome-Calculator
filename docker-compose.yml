@@ -18,5 +18,32 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: expense-app-api
+    restart: unless-stopped
+    env_file:
+      - apps/api/.env
+    environment:
+      DATABASE_URL: postgresql://expense:expense@postgres:5432/expense
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: expense-app-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
 volumes:
   postgres-data:

@@ -1,5 +1,7 @@
 import type { ReactElement } from "react";
 
+import { triggerClicky } from "../lib/clicky";
+
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
 export interface KeypadProps {
@@ -59,7 +61,10 @@ export function Keypad({
       data-testid={spec.testid}
       aria-label={`Digit ${digit}`}
       disabled={disabled}
-      onClick={() => onDigit(digit)}
+      onClick={(event) => {
+        triggerClicky(event.currentTarget);
+        onDigit(digit);
+      }}
       className="key-button disabled:opacity-40"
     >
       {digit}
@@ -73,7 +78,11 @@ export function Keypad({
       data-testid={spec.testid}
       aria-label={spec.aria}
       disabled={disabled || navDisabled?.[direction]}
-      onClick={() => onNavigate?.(direction)}
+       onClick={(event) => {
+        event.stopPropagation();
+        triggerClicky(event.currentTarget);
+        onNavigate?.(direction);
+      }}
       className="key-button disabled:opacity-[0.12] disabled:text-neutral-800 active:scale-90 active:brightness-150 transition-all duration-75"
     >
       {label}
@@ -121,7 +130,11 @@ export function Keypad({
         data-testid="key-0"
         aria-label="Digit 0"
         disabled={isSpecial ? true : disabled}
-        onClick={() => (!isSpecial ? onDigit("0") : undefined)}
+        onClick={(event) => {
+          if (isSpecial) return;
+          triggerClicky(event.currentTarget);
+          onDigit("0");
+        }}
         className="key-button disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         0
@@ -132,7 +145,11 @@ export function Keypad({
         data-testid="key-backspace"
         aria-label="Backspace"
         disabled={isSpecial ? true : disabled}
-        onClick={() => onBackspace()}
+        onClick={(event) => {
+          if (isSpecial) return;
+          triggerClicky(event.currentTarget);
+          onBackspace();
+        }}
         className="key-button text-neutral-300 disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         ⌫
@@ -143,8 +160,11 @@ export function Keypad({
         data-testid="key-enter"
         aria-label="Enter"
         disabled={enterDisabled}
-        onClick={onEnter}
-        className={`key-button text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none ${
+        onClick={(event) => {
+          triggerClicky(event.currentTarget);
+          onEnter();
+        }}
+        className={`key-button text-white active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none ${
           enterFlash === "over"
             ? "bg-red-600 animate-pulse shadow-[0_2px_0_0_#7f1d1d]"
             : enterFlash === "warning"

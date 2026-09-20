@@ -1,9 +1,264 @@
 @import "tailwindcss";
 
-:root {
+/* ---------------------------------------------------------------------------
+ * Theme variables — dark is the default; `html.light` re-maps the palette.
+ * Components keep their existing neutral/emerald utilities; the overrides
+ * below re-tint them per theme (no `dark:` variants sprinkled everywhere).
+ * ------------------------------------------------------------------------- */
+:root,
+html.dark {
   color-scheme: dark;
+  --app-bg: #0a0a0a;
+  --app-fg: #fafafa;
+  /* Keypad faces stay dark in both themes (calculator look). */
+  --key-face: #171717;
+  --key-face-hover: #262626;
+  --key-edge: #000000;
+  --key-text: #fafafa;
+  /* Chart bars — dark defaults match the previous neutral utilities. */
+  --bar-fill: #525252;
+  --bar-zero: #262626;
 }
 
+html.light {
+  color-scheme: light;
+  --app-bg: #F8F9FA;
+  --app-fg: #212529;
+  --key-text: #212529;
+  /* Light keypad: white faces with a soft grey edge */
+  --key-face: #FFFFFF;
+  --key-face-hover: #F1F3F5;
+  --key-edge: #CED4DA;
+  /* Light chart bars: flat light-grey, peak stays emerald */
+  --bar-fill: #E9ECEF;
+  --bar-zero: #E9ECEF;
+  /* Light theme brand/accent tokens */
+  --brand: #0CA678;
+  --brand-hover: #09825D;
+  --online-dot: #2B8A3E;
+}
+
+@layer base {
+  html,
+  html.light body {
+    background-color: var(--app-bg);
+    color: var(--app-fg);
+  }
+
+  /* Text re-tints — map Tailwind neutral scale onto light greys.
+     !important overrides the Tailwind color-mix() utility variants. */
+  html.light .text-neutral-50,
+  html.light .text-neutral-100 {
+    color: #212529 !important;
+  }
+  html.light .text-neutral-200 {
+    color: #262626 !important;
+  }
+  html.light .text-neutral-300 {
+    color: #495057 !important;
+  }
+  html.light .text-neutral-400,
+  html.light .text-neutral-500 {
+    color: #6C757D !important;
+  }
+  html.light .text-neutral-600 {
+    color: #8C9599 !important;
+  }
+  html.light .text-neutral-700 {
+    color: #ADB5BD !important;
+  }
+  html.light .text-amber-400\/90,
+  html.light .text-neutral-600 {
+    color: #8C9599 !important;
+  }
+
+  /* Surfaces: white / off-white / secondary greys */
+  html.light .bg-neutral-950,
+  html.light .bg-white {
+    background-color: #FFFFFF !important;
+  }
+  html.light .bg-neutral-950\/50,
+  html.light .bg-neutral-950\/40,
+  html.light .bg-neutral-900\/50,
+  html.light .bg-neutral-900\/40,
+  html.light .bg-neutral-900\/60 {
+    background-color: #F1F3F5 !important;
+  }
+  html.light .bg-neutral-900\/90,
+  html.light .bg-neutral-900\/30,
+  html.light .bg-neutral-900\/20,
+  html.light .bg-neutral-900\/10 {
+    background-color: #FFFFFF !important;
+  }
+  html.light .bg-neutral-900 {
+    background-color: #F1F3F5 !important;
+  }
+  html.light .bg-neutral-800\/80,
+  html.light .bg-neutral-800\/60 {
+    background-color: #E9ECEF !important;
+  }
+  html.light .bg-neutral-800\/90 {
+    background-color: #DEE2E6 !important;
+  }
+  html.light .bg-neutral-800\/70,
+  html.light .bg-neutral-800 {
+    background-color: #E9ECEF !important;
+  }
+  html.light .bg-neutral-700 {
+    background-color: #DEE2E6 !important;
+  }
+  html.light .bg-neutral-600,
+  html.light .bg-neutral-500,
+  html.light .bg-neutral-400 {
+    background-color: #CED4DA !important;
+  }
+  html.light .bg-neutral-400 {
+    background-color: #6C757D !important;
+  }
+
+  /* Hover states */
+  html.light .hover\:bg-neutral-900\/60:hover,
+  html.light .hover\:bg-neutral-800:hover,
+  html.light .hover\:bg-neutral-700:hover,
+  html.light .hover\:bg-neutral-800\/60:hover,
+  html.light .hover\:bg-neutral-800\/80:hover,
+  html.light .hover\:bg-neutral-800\/90:hover {
+    background-color: #DEE2E6 !important;
+  }
+  html.light .hover\:bg-neutral-900\/90:hover,
+  html.light .hover\:bg-neutral-900:hover {
+    background-color: #FFFFFF !important;
+  }
+  html.light .hover\:bg-emerald-600\/25:hover {
+    background-color: #dcfce7 !important;
+  }
+
+  /* Lines & dividers */
+  html.light .divide-neutral-900\/80 > :not([hidden]) ~ :not([hidden]),
+  html.light .divide-neutral-800\/80 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #DEE2E6 !important;
+  }
+  html.light .border-neutral-900,
+  html.light .border-neutral-900\/70,
+  html.light .border-neutral-900\/60,
+  html.light .border-neutral-800,
+  html.light .border-neutral-800\/60,
+  html.light .border-neutral-800\/70 {
+    border-color: #DEE2E6 !important;
+  }
+  html.light .border-neutral-700 {
+    border-color: #E9ECEF !important;
+  }
+  html.light .border-neutral-600,
+  html.light .border-neutral-500 {
+    border-color: #CED4DA !important;
+  }
+  html.light .border-neutral-400 {
+    border-color: #ADB5BD !important;
+  }
+
+  /* ------------------------------------------------------------------
+   * Emerald / Green theme → brand #0CA678
+   * ------------------------------------------------------------------ */
+  html.light .text-emerald-400,
+  html.light .text-emerald-300,
+  html.light .text-emerald-300\/90,
+  html.light .text-emerald-600 {
+    color: var(--brand) !important;
+  }
+  html.light .bg-emerald-500\/15,
+  html.light .bg-emerald-600\/15,
+  html.light .bg-emerald-950\/40 {
+    background-color: #dcfce7 !important;
+  }
+  html.light .border-emerald-700\/70,
+  html.light .border-emerald-500\/70 {
+    border-color: color-mix(in oklab, var(--brand) 30%, transparent) !important;
+  }
+  html.light .bg-emerald-500,
+  html.light .bg-emerald-400,
+  html.light .bg-emerald-600 {
+    background-color: var(--brand) !important;
+  }
+  html.light .bg-emerald-700 {
+    background-color: var(--brand-hover) !important;
+  }
+  html.light .active\:bg-emerald-700:active {
+    background-color: var(--brand-hover) !important;
+  }
+  html.light .active\:bg-emerald-600\/25:active {
+    background-color: #dcfce7 !important;
+  }
+  html.light .disabled\:bg-neutral-800:disabled,
+  html.light .disabled\:bg-neutral-900:disabled {
+    background-color: #E9ECEF !important;
+  }
+
+  /* Red / amber / yellow semantic */
+  html.light .text-red-400,
+  html.light .text-red-300,
+  html.light .text-red-200 {
+    color: #dc2626 !important;
+  }
+  html.light .bg-red-950\/40,
+  html.light .bg-red-950\/30,
+  html.light .bg-red-950\/20 {
+    background-color: #fee2e2 !important;
+  }
+  html.light .border-red-900\/70,
+  html.light .border-red-800 {
+    border-color: #fecaca !important;
+  }
+  html.light .text-amber-400,
+  html.light .text-amber-300 {
+    color: #d97706 !important;
+  }
+  html.light .text-amber-400\/90 {
+    color: color-mix(in oklab, #f59e0b 90%, transparent) !important;
+  }
+  html.light .bg-amber-950\/40,
+  html.light .bg-amber-950\/30,
+  html.light .bg-amber-950\/20 {
+    background-color: #fef3c7 !important;
+  }
+  html.light .border-amber-900\/70,
+  html.light .border-amber-800 {
+    border-color: #fed7aa !important;
+  }
+  html.light .bg-amber-500 {
+    background-color: #f59e0b !important;
+  }
+  html.light .bg-red-500 {
+    background-color: #ef4444 !important;
+  }
+  html.light .bg-red-600 {
+    background-color: #dc2626 !important;
+  }
+  html.light .bg-red-700 {
+    background-color: #b91c1c !important;
+  }
+  html.light .bg-yellow-400 {
+    background-color: #facc15 !important;
+  }
+  html.light .text-yellow-400 {
+    color: #ca8a04 !important;
+  }
+
+  /* Online indicator dot uses the dark green, not the brand */
+  html.light [data-testid="conn-indicator"] .bg-neutral-500 {
+    background-color: #6C757D !important;
+  }
+
+  /* Keypad Enter key: brand green text on light face */
+  html.light .key-button.text-white {
+    color: #ffffff !important;
+    background-color: var(--brand) !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Base + keypad component styles
+ * ------------------------------------------------------------------------- */
 html,
 body,
 #root {
@@ -12,8 +267,8 @@ body,
 
 body {
   margin: 0;
-  background-color: #0a0a0a;
-  color: #fafafa;
+  background-color: var(--app-bg);
+  color: var(--app-fg);
   font-family:
     ui-sans-serif,
     system-ui,
@@ -34,15 +289,21 @@ body {
     align-items: center;
     justify-content: center;
     border-radius: 0.75rem;
-    background-color: #171717;
+    background-color: var(--key-face);
     font-size: 1.25rem;
     font-weight: 500;
-    color: #fafafa;
-    box-shadow: 0 2px 0 0 #000;
-    transition: background-color 120ms ease;
+    color: var(--key-text);
+    border: 1px solid var(--key-edge);
+    box-shadow: 0 2px 0 0 var(--key-edge);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      box-shadow 80ms ease,
+      transform 80ms ease,
+      filter 80ms ease;
   }
   .key-button:hover {
-    background-color: #262626;
+    background-color: var(--key-face-hover);
   }
   .key-button:active {
     box-shadow: none;
@@ -50,6 +311,25 @@ body {
   }
   .key-button:disabled {
     cursor: not-allowed;
+  }
+  /* Clicky pulse — triggered by JS for both taps and physical keypresses. */
+  .key-button.key-clicky {
+    animation: clicky 140ms ease-out;
+  }
+}
+
+@keyframes clicky {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+  30% {
+    filter: brightness(1.7) contrast(1.15);
+    transform: translateY(1px);
+  }
+  100% {
+    filter: brightness(1);
+    transform: translateY(0);
   }
 }
 
@@ -93,20 +373,4 @@ body {
 
 .animate-shake {
   animation: shake 0.4s ease-in-out;
-}
-
-@keyframes clicky-pulse {
-  0% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.5) contrast(1.2);
-  }
-  100% {
-    filter: brightness(1);
-  }
-}
-
-.animate-clicky-pulse {
-  animation: clicky-pulse 0.12s ease-out;
 }

@@ -608,8 +608,8 @@ describe("App — user menu", () => {
     expect(del.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect(logout.querySelector("svg[aria-hidden='true']")).not.toBeNull();
 
-    // Two dividers: one after PIN, one before delete.
-    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(2);
+    // Three dividers: after PIN, after theme toggle, before delete.
+    expect(menu.querySelectorAll(".border-neutral-800.border-t")).toHaveLength(3);
   });
 
   it("toggling the insight ticker from the insight screen hides it on home", async () => {
@@ -775,7 +775,7 @@ describe("App — history navigation matrix", () => {
     // Down enabled at first row.
     expect(screen.getByTestId("key-8")).not.toBeDisabled();
 
-    // Last row selected → down disabled.
+     // Last row selected → down disabled.
     await user.click(screen.getByTestId("summary-row-b"));
     await user.keyboard("{ArrowDown}");
     expect(screen.getByTestId("key-8")).toBeDisabled();

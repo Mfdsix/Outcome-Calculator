@@ -39,8 +39,10 @@ import {
 } from "../lib/api";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
+import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange, toIsoDateOnly } from "../lib/periods";
+import { applyTheme } from "../lib/theme";
 import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
@@ -97,6 +99,12 @@ function isOfflineCause(cause: unknown): boolean {
  */
 export default function App() {
   const lock = useLockFlow();
+
+  // Sync the persisted theme onto <html> (main.tsx pre-paints; this keeps the
+  // class correct if storage changed while the tab stayed open).
+  useEffect(() => {
+    applyTheme();
+  }, []);
 
   if (!lock.unlocked) {
     return (
@@ -821,12 +829,17 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             moveTransactionSelection(direction);
             return;
           }
-          if (period === "day") {
-            moveTransactionSelection(direction);
-            return;
-          }
-          const keys = chartBuckets.map((bucket) => bucket.key);
-          if (keys.length === 0) return;
+           if (period === "day") {
+             moveTransactionSelection(direction);
+             return;
+           }
+           // SummaryList for W/M uses groupExpensesByDay (newest-first), so the
+           // navigation domain must be descending to mirror the vertical list:
+           // index 0 = newest/uppermost, up → smaller index → newer row.
+           const keys = chartBuckets
+             .map((bucket) => bucket.key)
+             .reverse();
+           if (keys.length === 0) return;
           const index = keys.indexOf(selectedKey ?? "");
           const valid = index < 0 ? 0 : index;
           const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
@@ -842,7 +855,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     const domainKeys =
       inDrill || period === "day"
         ? expenses.map((e) => e.id)
-        : chartBuckets.map((b) => b.key);
+        : chartBuckets.map((b) => b.key).reverse();
 
     if (domainKeys.length === 0) {
       return {
@@ -1007,18 +1020,23 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       if (isSpecial) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
+          triggerClicky(keyEl("key-2"));
           handleNavigate("up");
         } else if (event.key === "ArrowDown") {
           event.preventDefault();
+          triggerClicky(keyEl("key-8"));
           handleNavigate("down");
         } else if (event.key === "ArrowLeft") {
           event.preventDefault();
+          triggerClicky(keyEl("key-4"));
           handleNavigate("left");
         } else if (event.key === "ArrowRight") {
           event.preventDefault();
+          triggerClicky(keyEl("key-6"));
           handleNavigate("right");
         } else if (event.key === "Enter") {
           event.preventDefault();
+          triggerClicky(keyEl("key-enter"));
           handleSpecialEnter();
         }
         return;
@@ -1026,12 +1044,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
+        triggerClicky(keyEl(digitKeyTestId(event.key)));
         calc.pressDigit(event.key);
       } else if (event.key === "Backspace") {
         event.preventDefault();
+        triggerClicky(keyEl("key-backspace"));
         calc.pressBackspace();
       } else if (event.key === "Enter") {
         event.preventDefault();
+        triggerClicky(keyEl("key-enter"));
         void handleEnter();
       }
     };
