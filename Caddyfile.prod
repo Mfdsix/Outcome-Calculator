@@ -1,0 +1,16 @@
+# Production edge: automatic HTTPS via Let's Encrypt.
+#
+# {$CADDY_DOMAIN} is interpolated by Caddy from its environment (set in
+# docker-compose.prod.yml, sourced from the root .env). Requirements:
+#   - the domain's A record points at this VPS,
+#   - ports 80 and 443 are reachable (80 needed for the ACME challenge),
+#   - "web" is up on the same compose network (nginx serves the SPA + /api).
+# Caddy obtains and renews the certificate on its own and redirects plain
+# HTTP to HTTPS. Without HTTPS the browser never registers the service
+# worker and never offers "Install app" — this file is what makes the PWA
+# installable from a phone.
+{$CADDY_DOMAIN} {
+	# Everything (SPA, assets, sw.js, manifest, /api) is handled by the
+	# existing nginx "web" service; see apps/web/nginx.conf.
+	reverse_proxy web:80
+}

@@ -42,10 +42,33 @@ services:
         VITE_API_URL: ""
     container_name: expense-app-web
     restart: unless-stopped
+    # HTTP-only debug entry (no TLS → no service worker → no PWA install).
+    # Phones must use the caddy service below; remove if unwanted.
     ports:
       - "6600:80"
     depends_on:
       - api
 
+  # HTTPS edge. Chrome only registers the service worker (and offers
+  # "Install app" / offline mode) over HTTPS or localhost, so the phone must
+  # open https://$CADDY_DOMAIN. Caddy handles certs + HTTP→HTTPS redirect.
+  caddy:
+    image: caddy:2-alpine
+    container_name: expense-app-caddy
+    restart: unless-stopped
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?Set CADDY_DOMAIN in the root .env (see .env.example)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:

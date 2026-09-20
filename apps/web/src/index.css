@@ -326,6 +326,16 @@ body {
     sans-serif;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  /* Standalone PWA: no rubber-band/pull-to-refresh on the document itself. */
+  overscroll-behavior-y: none;
+}
+
+/* Notch / gesture bars: the app shell must never collide with the Android
+   status bar or iOS notch when launched standalone (viewport-fit=cover is set
+   on the meta viewport). Fixed overlays still cover the full screen. */
+#root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 @layer components {
