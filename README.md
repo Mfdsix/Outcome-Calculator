@@ -48,6 +48,38 @@ npm run dev                 # api + web
 - Web → http://localhost:5173
 - API → http://localhost:3000
 
+## Production deploy (HTTPS + PWA install)
+
+Chrome only registers the service worker — and therefore only offers
+**Install app**, standalone launch and offline mode — over **HTTPS** (or
+localhost). Opening the plain `http://VPS:6600` debug port from a phone will
+never be installable, no matter what the manifest says. The prod compose file
+adds a Caddy edge that terminates TLS automatically:
+
+1. Point a domain's A record at the VPS (an IP alone cannot get Let's Encrypt
+   certificates).
+2. Open ports **80** and **443** on the VPS firewall (80 is required for the
+   ACME challenge).
+3. Put the domain in the **root** `.env` (see `.env.example`):
+   `CADDY_DOMAIN=expense.example.com`
+4. Start the prod stack:
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d --build
+   ```
+   Caddy fetches/renews the certificate and redirects HTTP → HTTPS; everything
+   (SPA, assets, `sw.js`, `manifest.webmanifest`, `/api`) is proxied to the
+   nginx `web` service.
+5. On the phone: open `https://<domain>` once **online** → Chrome menu →
+   **Install app** (not "Create shortcut"). After that first visit the whole
+   app shell is precached: airplane mode + cold start still boots, and Today
+   (D) CRUD keeps working via the IndexedDB outbox (synced when back online).
+
+Offline scope (by design, plan §5): Today/Day is fully offline-capable;
+Week/Month require internet and show a hint when opened offline.
+
+`http://VPS:6600` stays up as an HTTP-only debugging entry — expect no
+service worker there.
+
 ## Troubleshooting
 
 **Login returns 404 or "Could not save expense":**
