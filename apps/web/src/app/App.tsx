@@ -1223,15 +1223,16 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           )
         }
         trailing={
-          !IS_TAURI ? (
-            <UserMenu
-              onLogout={logout}
-              onAccountDeleted={logout}
-              budgetStatus={budget.active?.status ?? null}
-              onOpenBudget={openBudget}
-              onOpenInsight={openInsight}
-            />
-          ) : null
+          // The menu stays in the native build too (theme toggle + Keluar
+          // locks the screen); server-only items hide via `localOnly`.
+          <UserMenu
+            onLogout={logout}
+            onAccountDeleted={logout}
+            budgetStatus={budget.active?.status ?? null}
+            onOpenBudget={openBudget}
+            onOpenInsight={openInsight}
+            localOnly={IS_TAURI}
+          />
         }
       />
 
