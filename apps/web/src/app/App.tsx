@@ -438,18 +438,6 @@ function AppBody({ logout }: { logout: () => void }) {
     }, 3000);
   }, [getStatusNow]);
 
-  /** Transaction-facing modes (day summary + drill) default to the newest row;
-   * otherwise no auto-selection. Drop a selection that no longer resolves to
-   * a live expense.
-   */
-  useEffect(() => {
-    const isTxMode = inDrill || period === "day";
-    if (!isTxMode || expenses.length === 0) return;
-    if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
-      setSelectedKey(expenses[0]?.id ?? null);
-    }
-  }, [expenses, inDrill, period, selectedKey, setSelectedKey]);
-
   /** In drill mode the transaction-facing selection lives in a second slot
    * so the bucket selection (chart) is preserved for when we go back up. */
   const transactionKeyRef = useRef<string | null>(null);
@@ -793,6 +781,28 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     // W/M: selectedKey is already a bucket (day) key.
     return selectedKey;
   }, [inDrill, period, selectedKey, expenses, drillDayKey]);
+
+  /** Auto-selection policy per view mode:
+   *  - transaction-facing (day summary + drill): newest row first.
+   *  - bucket-facing (W/M summary): seed the current day on entry/refresh so a
+   *    follow-up Enter drills into today; fall back to the first bucket.
+   *  Selection is (re)seeded on entry/refresh; navigation keeps it within the
+   *  bucket set so it isn't clobbered here. */
+  useEffect(() => {
+    if (expenses.length === 0) return;
+    if (inDrill || period === "day") {
+      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
+        setSelectedKey(expenses[0]?.id ?? null);
+      }
+      return;
+    }
+    // W/M summary: seed the current day on entry / data refresh so drilling via
+    // Enter lands on today; fall back to the first bucket if none is current.
+    const seed = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
+    if (selectedKey === null || !chartBuckets.some((bucket) => bucket.key === selectedKey)) {
+      setSelectedKey(seed);
+    }
+  }, [expenses, inDrill, period, selectedKey, chartBuckets, setSelectedKey]);
 
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
