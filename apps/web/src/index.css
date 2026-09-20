@@ -257,6 +257,31 @@ html.light {
 }
 
 /* ---------------------------------------------------------------------------
+ * Theme transition — smooth color/border/bg swap when toggling light/dark.
+ * Scoped to theme-sensitive surfaces (avoids a global `*` which can be heavy
+ * and cause unexpected fade-in on mount).
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  html,
+  body,
+  #root,
+  [data-testid="bar-chart"],
+  [data-testid="summary-list"],
+  [data-testid="browse-list"],
+  [data-testid="user-menu"],
+  [role="menu"],
+  .rounded-xl,
+  .rounded-lg {
+    transition:
+      background-color 0.25s ease,
+      border-color 0.25s ease,
+      color 0.25s ease,
+      box-shadow 0.25s ease,
+      transform 0.25s ease;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Base + keypad component styles
  * ------------------------------------------------------------------------- */
 html,

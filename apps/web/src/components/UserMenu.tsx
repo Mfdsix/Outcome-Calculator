@@ -217,7 +217,15 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+                <circle cx="12" cy="12" r="4" />
+                <line x1="12" y1="2" x2="12" y2="4" />
+                <line x1="12" y1="20" x2="12" y2="22" />
+                <line x1="4.9" y1="4.9" x2="6.3" y2="6.3" />
+                <line x1="17.7" y1="17.7" x2="19.1" y2="19.1" />
+                <line x1="2" y1="12" x2="4" y2="12" />
+                <line x1="20" y1="12" x2="22" y2="12" />
+                <line x1="4.9" y1="19.1" x2="6.3" y2="17.7" />
+                <line x1="17.7" y1="6.3" x2="19.1" y2="4.9" />
               </svg>
             ) : (
               <svg
@@ -231,11 +239,10 @@ export function UserMenu({ onLogout, onAccountDeleted, budgetStatus, onOpenBudge
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
               </svg>
             )}
-            <span className="flex-1">Mode {theme === "light" ? "Gelap" : "Terang"}</span>
+            <span className="flex-1">Mode {theme === "light" ? "Terang" : "Gelap"}</span>
             <span
               aria-hidden="true"
               className={`relative inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors ${

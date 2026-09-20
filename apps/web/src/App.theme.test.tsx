@@ -75,16 +75,18 @@ describe("App — theme toggle", () => {
     expect(localStorage.getItem("expense-app.theme")).toBe("light");
   });
 
-  it("shows the opposite target mode as the label", async () => {
+  it("shows the active mode as the label", async () => {
     const user = userEvent.setup();
     await renderUnlocked();
 
     await user.click(screen.getByTestId("user-menu-button"));
-    expect(screen.getByTestId("user-menu-theme")).toHaveTextContent("Mode Terang");
+    // Default is dark → label names the active mode.
+    expect(screen.getByTestId("user-menu-theme")).toHaveTextContent("Mode Gelap");
 
     await user.click(screen.getByTestId("user-menu-theme"));
+    // Theme button closes the menu (setOpen(false)); reopen to read the label.
     await user.click(screen.getByTestId("user-menu-button"));
-    expect(screen.getByTestId("user-menu-theme")).toHaveTextContent("Mode Gelap");
+    expect(screen.getByTestId("user-menu-theme")).toHaveTextContent("Mode Terang");
   });
 
   it("restores light mode after a remount (persisted)", async () => {

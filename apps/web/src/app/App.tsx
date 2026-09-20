@@ -782,27 +782,13 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return selectedKey;
   }, [inDrill, period, selectedKey, expenses, drillDayKey]);
 
-  /** Auto-selection policy per view mode:
-   *  - transaction-facing (day summary + drill): newest row first.
-   *  - bucket-facing (W/M summary): seed the current day on entry/refresh so a
-   *    follow-up Enter drills into today; fall back to the first bucket.
-   *  Selection is (re)seeded on entry/refresh; navigation keeps it within the
-   *  bucket set so it isn't clobbered here. */
-  useEffect(() => {
-    if (expenses.length === 0) return;
-    if (inDrill || period === "day") {
-      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
-        setSelectedKey(expenses[0]?.id ?? null);
-      }
-      return;
-    }
-    // W/M summary: seed the current day on entry / data refresh so drilling via
-    // Enter lands on today; fall back to the first bucket if none is current.
-    const seed = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
-    if (selectedKey === null || !chartBuckets.some((bucket) => bucket.key === selectedKey)) {
-      setSelectedKey(seed);
-    }
-  }, [expenses, inDrill, period, selectedKey, chartBuckets, setSelectedKey]);
+  /**
+   * Day keys for W/M summary navigation, in the same descending order the sparse
+   * SummaryList renders (newest first). Using this (instead of chartBuckets)
+   * keeps selection + up/down + disabled state aligned to the rows actually
+   * shown, so the highlight never vanishes on a zero-data day.
+   */
+  const navDayKeys = useMemo(() => groupExpensesByDay(expenses).map((d) => d.key), [expenses]);
 
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
@@ -843,29 +829,24 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
              moveTransactionSelection(direction);
              return;
            }
-           // SummaryList for W/M uses groupExpensesByDay (newest-first), so the
-           // navigation domain must be descending to mirror the vertical list:
-           // index 0 = newest/uppermost, up → smaller index → newer row.
-           const keys = chartBuckets
-             .map((bucket) => bucket.key)
-             .reverse();
-           if (keys.length === 0) return;
-          const index = keys.indexOf(selectedKey ?? "");
-          const valid = index < 0 ? 0 : index;
-          const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
-          setSelectedKey(keys[next] ?? null);
-          return;
-        }
-      }
-    },
-    [openHistory, period, inDrill, moveTransactionSelection, chartBuckets, selectedKey, setSelectedKey],
-  );
+            const keys = navDayKeys;
+            if (keys.length === 0) return;
+           const index = keys.indexOf(selectedKey ?? "");
+           const valid = index < 0 ? 0 : index;
+           const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
+           setSelectedKey(keys[next] ?? null);
+           return;
+         }
+       }
+     },
+     [openHistory, period, inDrill, moveTransactionSelection, navDayKeys, selectedKey, setSelectedKey],
+   );
 
   const navDisabled = useMemo<Partial<Record<"up" | "down" | "left" | "right", boolean>>>(() => {
     const domainKeys =
       inDrill || period === "day"
         ? expenses.map((e) => e.id)
-        : chartBuckets.map((b) => b.key).reverse();
+        : navDayKeys;
 
     if (domainKeys.length === 0) {
       return {
@@ -1157,6 +1138,33 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       right: groupDigits(String(day.total)),
     }));
   }, [inDrill, period, expenses, pendingIds, now]);
+
+  /** Auto-selection policy per view mode:
+   *  - transaction-facing (day summary + drill): newest row first.
+   *  - bucket-facing (W/M summary): seed the most-recent day that actually has
+   *    data (first row of the sparse summary list) so the highlight is always
+   *    visible; fall back to today's chart day, then the first bucket.
+   *  Selection is (re)seeded on entry/refresh; navigation keeps it within the
+   *  bucket set so it isn't clobbered here. */
+  useEffect(() => {
+    if (expenses.length === 0) return;
+    if (inDrill || period === "day") {
+      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
+        setSelectedKey(expenses[0]?.id ?? null);
+      }
+      return;
+    }
+    const seed =
+      summaryRows[0]?.key ??
+      chartBuckets.find((bucket) => bucket.isCurrent)?.key ??
+      chartBuckets[0]?.key ??
+      null;
+    // Drop a selection that is no longer present in the rendered (sparse) list
+    // — avoids a stale key that highlights a bar but no SummaryList row.
+    if (selectedKey === null || !summaryRows.some((row) => row.key === selectedKey)) {
+      setSelectedKey(seed);
+    }
+  }, [expenses, inDrill, period, selectedKey, chartBuckets, summaryRows, setSelectedKey]);
 
   const drillDayTotal = useMemo(
     () =>
