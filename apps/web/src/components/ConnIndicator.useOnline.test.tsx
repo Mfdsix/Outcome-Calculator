@@ -38,10 +38,11 @@ describe("useOnline", () => {
 });
 
 describe("ConnIndicator", () => {
-  it("renders Online (green) when connected with nothing pending", () => {
+  it("shows only the green dot when fully online (no Online label)", () => {
     render(<ConnIndicator online syncing={false} pending={0} />);
     const indicator = screen.getByTestId("conn-indicator");
-    expect(screen.getByTestId("conn-indicator-label")).toHaveTextContent("Online");
+    // Fully connected → no status label, just the green dot.
+    expect(screen.queryByTestId("conn-indicator-label")).toBeNull();
     expect(indicator.querySelector("span")).toHaveClass("bg-emerald-500");
   });
 
