@@ -25,6 +25,7 @@ import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
 import { useInsights } from "../hooks/useInsights";
+import { useLocalLockFlow } from "../hooks/useLocalLockFlow";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
 import {
@@ -34,9 +35,10 @@ import {
   OfflineError,
   UnauthorizedError,
   authApi,
-  expensesApi,
   setAuthToken,
 } from "../lib/api";
+import { expensesRepository } from "../lib/repository";
+import { IS_TAURI } from "../lib/tauri";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
@@ -98,7 +100,14 @@ function isOfflineCause(cause: unknown): boolean {
  * Header reflects online state + sync progress.
  */
 export default function App() {
-  const lock = useLockFlow();
+  // Dual lock flows (Tauri plan §3): the browser build authenticates against
+  // the API; the native build uses the local PIN screen gate. Both hooks are
+  // called unconditionally (rules of hooks); the unused one stays inert —
+  // useLockFlow has no token to refresh in Tauri, useLocalLockFlow no-ops
+  // outside Tauri.
+  const webLock = useLockFlow();
+  const nativeLock = useLocalLockFlow();
+  const lock = IS_TAURI ? nativeLock : webLock;
 
   // Sync the persisted theme onto <html> (main.tsx pre-paints; this keeps the
   // class correct if storage changed while the tab stayed open).
@@ -128,7 +137,7 @@ export default function App() {
 // Lock flow + session visit refresh
 // ---------------------------------------------------------------------------
 
-interface LockFlow {
+export interface LockFlow {
   unlocked: boolean;
   stage: "idle" | "locked" | "new-pin";
   busy: boolean;
@@ -600,7 +609,7 @@ function AppBody({ logout }: { logout: () => void }) {
         }
       }
       try {
-        const saved = await expensesApi.update(id, { amount });
+        const saved = await expensesRepository.update(id, { amount });
         applyOptimisticUpdate(saved);
         doFlash();
         // Amount is in — soft post-Enter budget feedback (plan §3).
@@ -695,7 +704,7 @@ function AppBody({ logout }: { logout: () => void }) {
     }
 
     try {
-      const saved = await expensesApi.create({ amount });
+      const saved = await expensesRepository.create({ amount });
       revertOptimisticCreate(optimistic);
       applyOptimisticCreate(saved);
     } catch (cause) {
@@ -923,7 +932,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     }
 
     try {
-      await expensesApi.remove(id);
+      await expensesRepository.delete(id);
       restoreHistory(editOrigin);
       clearEditOrigin();
     } catch (cause) {
@@ -1208,9 +1217,13 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       <Header
         periodLabel={effectivePeriodLabel}
         totalLabel={totalLabel}
-        status={<ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />}
+        status={
+          IS_TAURI ? null : (
+            <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+          )
+        }
         trailing={
-          <>
+          !IS_TAURI ? (
             <UserMenu
               onLogout={logout}
               onAccountDeleted={logout}
@@ -1218,7 +1231,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               onOpenBudget={openBudget}
               onOpenInsight={openInsight}
             />
-          </>
+          ) : null
         }
       />
 

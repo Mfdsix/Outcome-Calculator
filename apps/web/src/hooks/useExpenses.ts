@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ExpenseDto } from "@expense-app/shared";
 
-import { expensesApi } from "../lib/api";
+import { expensesRepository } from "../lib/repository";
 import { formatIDRAbbreviated } from "../lib/currency";
 import { civilDayKey, loadTodayCache, saveTodayCache, type TodayCache } from "../lib/offlineDb";
 import { periodQuery, PERIOD_LABEL } from "../lib/periods";
@@ -84,8 +84,8 @@ export function useExpenses(): UseExpensesResult {
     const nowIso = new Date().toISOString();
     const dayKey = civilDayKey(nowIso);
 
-    expensesApi
-      .list(from, to, nowIso)
+    expensesRepository
+      .list(from, to)
       .then((response) => {
         if (reloadIdRef.current !== reloadId) return;
         setExpenses(response.expenses.slice().sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()));

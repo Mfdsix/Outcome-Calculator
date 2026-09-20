@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BudgetActiveResponse, BudgetHistoryItem } from "@expense-app/shared";
 
 import { budgetsApi } from "../lib/api";
+import { IS_TAURI } from "../lib/tauri";
 
 export interface BudgetState {
   /** Active budget + server-computed spent/remaining, or null. */
@@ -39,6 +40,9 @@ export function useBudget(): BudgetState {
   const inflightRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(() => {
+    // Native build: budgets are a backend feature (plan §3 — no budgets in
+    // the local MVP); the screen is hidden and the hook stays a stub.
+    if (IS_TAURI) return;
     inflightRef.current?.abort();
     const controller = new AbortController();
     inflightRef.current = controller;
@@ -75,6 +79,7 @@ export function useBudget(): BudgetState {
       startDate: string;
       endDate: string;
     }): Promise<boolean> => {
+      if (IS_TAURI) return false;
       try {
         await budgetsApi.create(payload);
         refresh();
@@ -88,6 +93,7 @@ export function useBudget(): BudgetState {
   );
 
   const removeBudget = useCallback(async (): Promise<boolean> => {
+    if (IS_TAURI) return false;
     try {
       await budgetsApi.remove();
       refresh();
@@ -100,6 +106,7 @@ export function useBudget(): BudgetState {
 
   const getStatusNow = useCallback(
     async (): Promise<BudgetActiveResponse["budget"]> => {
+      if (IS_TAURI) return null; // soft: toast is best-effort, never an error banner
       try {
         const response = await budgetsApi.getActive();
         return response.budget;
