@@ -7,10 +7,20 @@ import type { Period } from "../types/ui";
 export const APP_TIMEZONE = "Asia/Jakarta";
 
 export const PERIOD_LABEL: Record<Period, string> = {
-  day: "Day",
-  week: "Week",
-  month: "Month",
+  day: "Today",
+  week: "This Week",
+  month: "This Month",
 };
+
+/** Civil YYYY-MM-DD string from `now` in `tz` (en-CA numeric format). */
+export function toIsoDateOnly(now: Date = new Date(), tz = APP_TIMEZONE): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: tz,
+  }).format(now);
+}
 
 /** Half-open [from, to) ISO range for the period containing `now`. */
 export function currentPeriodRange(period: Period, now: Date = new Date()): PeriodRange {

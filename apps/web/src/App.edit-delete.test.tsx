@@ -12,10 +12,15 @@ vi.mock("./lib/api", () => {
   const remove = vi.fn();
   const login = vi.fn();
   const refresh = vi.fn();
-  const deactivate = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
-    authApi: { login, refresh, deactivate },
+    budgetsApi: {
+      getActive: vi.fn().mockResolvedValue({ budget: null }),
+      history: vi.fn().mockResolvedValue({ history: [] }),
+      create: vi.fn().mockResolvedValue({ id: "budget-1" }),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
+    authApi: { login, refresh },
     ApiError: class ApiError extends Error {
       status: number;
       constructor(status: number, message: string) {
@@ -23,21 +28,20 @@ vi.mock("./lib/api", () => {
         this.status = status;
       }
     },
-    OfflineError: class OfflineError extends Error {
-      status = 0;
-      constructor() {
-        super("offline");
-        this.name = "OfflineError";
-      }
-    },
     UnauthorizedError: class UnauthorizedError extends Error {},
+    OfflineError: class OfflineError extends Error { status = 0; constructor() { super("offline"); this.name = "OfflineError"; } },
+    isOnline: vi.fn(() => true),
+    loadToken: vi.fn((): string | null => null),
     readLastVisit: vi.fn(() => 0),
     writeLastVisit: vi.fn(),
-    loadToken: vi.fn((): string | null => null),
     setAuthToken: vi.fn(),
-    isOnline: vi.fn(() => true),
   };
 });
+
+vi.mock("../hooks/useOnline", () => ({ useOnline: () => true }));
+vi.mock("../hooks/useSync", () => ({ useSync: () => ({ pending: 0, syncing: false }) }));
+vi.mock("../lib/offlineDb", () => ({ mutateOutbox: vi.fn(), mutateTodayCache: vi.fn() }));
+vi.mock("../lib/sync", () => ({ queueOfflineCreate: vi.fn(), queueOfflineDelete: vi.fn(), queueOfflineUpdate: vi.fn() }));
 
 const listMock = vi.mocked(expensesApi.list);
 const updateMock = vi.mocked(expensesApi.update);

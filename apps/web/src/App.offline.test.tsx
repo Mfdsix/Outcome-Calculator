@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./app/App";
-import { ApiError, authApi, expensesApi } from "./lib/api";
+import { ApiError, authApi, budgetsApi, expensesApi } from "./lib/api";
 import { clearOutbox, readOutbox } from "./lib/offlineDb";
 
 /**
@@ -23,8 +23,13 @@ vi.mock("./lib/api", () => {
   const login = vi.fn();
   const refresh = vi.fn();
   const deactivate = vi.fn();
+  const budgetsGetActive = vi.fn();
+  const budgetsHistory = vi.fn();
+  const budgetsCreate = vi.fn();
+  const budgetsRemove = vi.fn();
   return {
     expensesApi: { list, create, update, remove },
+    budgetsApi: { getActive: budgetsGetActive, history: budgetsHistory, create: budgetsCreate, remove: budgetsRemove },
     authApi: { login, refresh, deactivate },
     ApiError: class ApiError extends Error {
       status: number;
@@ -54,6 +59,8 @@ const createMock = vi.mocked(expensesApi.create);
 const updateMock = vi.mocked(expensesApi.update);
 const removeMock = vi.mocked(expensesApi.remove);
 const loginMock = vi.mocked(authApi.login);
+const budgetsGetActiveMock = vi.mocked(budgetsApi.getActive);
+const budgetsHistoryMock = vi.mocked(budgetsApi.history);
 
 async function setOnline(value: boolean): Promise<void> {
   await act(async () => {
@@ -63,6 +70,8 @@ async function setOnline(value: boolean): Promise<void> {
 }
 
 beforeEach(async () => {
+  budgetsGetActiveMock.mockResolvedValue({ budget: null });
+  budgetsHistoryMock.mockResolvedValue({ history: [] });
   vi.clearAllMocks();
   localStorage.clear();
   await clearOutbox(TOKEN);

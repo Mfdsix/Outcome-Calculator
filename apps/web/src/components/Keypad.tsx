@@ -8,8 +8,12 @@ export interface KeypadProps {
   onEnter: () => void;
   enterDisabled: boolean;
   disabled?: boolean;
-  /** Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
-   * navDisabled (special mode only) dims + disables individual directions. */
+  /** Post-Enter budget blink (plan §3): brief amber/red pulse on Enter. */
+  enterFlash?: false | "warning" | "over";
+  /**
+   * Special (history) mode: 2↑ 4← 6→ 8↓ navigate; Enter drills; rest inert.
+   * navDisabled (special mode only) dims + disables individual directions.
+   */
   layout?: "calc" | "special";
   onNavigate?: (direction: "up" | "down" | "left" | "right") => void;
   navDisabled?: Partial<Record<"up" | "down" | "left" | "right", boolean>>;
@@ -28,6 +32,7 @@ export function Keypad({
   onEnter,
   enterDisabled,
   disabled,
+  enterFlash = false,
   layout = "calc",
   onNavigate,
   navDisabled,
@@ -69,7 +74,7 @@ export function Keypad({
       aria-label={spec.aria}
       disabled={disabled || navDisabled?.[direction]}
       onClick={() => onNavigate?.(direction)}
-      className="key-button disabled:opacity-40"
+      className="key-button disabled:opacity-[0.12] disabled:text-neutral-800 active:scale-90 active:brightness-150 transition-all duration-75"
     >
       {label}
     </button>
@@ -83,7 +88,7 @@ export function Keypad({
       aria-label={spec.aria}
       disabled={true}
       onClick={() => {}}
-      className="key-button disabled:opacity-40"
+      className="key-button disabled:opacity-[0.12] disabled:text-neutral-800"
     >
       {label}
     </button>
@@ -111,13 +116,13 @@ export function Keypad({
     <div className="grid grid-cols-3 gap-2 pb-4" data-testid="keypad">
       {specs.map((spec) => renderCell(spec))}
 
-            <button
+      <button
         type="button"
         data-testid="key-0"
         aria-label="Digit 0"
         disabled={isSpecial ? true : disabled}
         onClick={() => (!isSpecial ? onDigit("0") : undefined)}
-        className="key-button disabled:opacity-40"
+        className="key-button disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         0
       </button>
@@ -128,7 +133,7 @@ export function Keypad({
         aria-label="Backspace"
         disabled={isSpecial ? true : disabled}
         onClick={() => onBackspace()}
-        className="key-button text-neutral-300 disabled:opacity-40"
+        className="key-button text-neutral-300 disabled:opacity-[0.12] disabled:text-neutral-800"
       >
         ⌫
       </button>
@@ -139,7 +144,13 @@ export function Keypad({
         aria-label="Enter"
         disabled={enterDisabled}
         onClick={onEnter}
-        className="key-button bg-emerald-600 text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+        className={`key-button text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none ${
+          enterFlash === "over"
+            ? "bg-red-600 animate-pulse shadow-[0_2px_0_0_#7f1d1d]"
+            : enterFlash === "warning"
+              ? "bg-amber-500 animate-pulse shadow-[0_2px_0_0_#78350f]"
+              : "bg-emerald-600"
+        }`}
       >
         Enter
       </button>

@@ -41,7 +41,7 @@ export function PeriodSelector({ highlight, onOpen, onActiveTap, disabledVisual 
             aria-label={highlighted ? `Kembali ke kalkulator dari ${label}` : `Pilih ${label}`}
             data-testid={`period-${value}`}
             onClick={() => (highlighted ? onActiveTap() : onOpen(value))}
-            className={`min-h-11 min-w-14 rounded-lg border px-3 text-sm font-semibold transition-colors ${
+             className={`min-h-11 min-w-14 rounded-lg border px-3 text-sm font-semibold outline-none focus-visible:ring-0 transition-colors ${
               highlighted
                 ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-300"
                 : dimmed

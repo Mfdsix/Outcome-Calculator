@@ -5,10 +5,13 @@ import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTi
 import { AmountDisplay } from "../components/AmountDisplay";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
+import { BudgetScreen } from "../components/BudgetScreen";
 import { ConnIndicator } from "../components/ConnIndicator";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { EditActions } from "../components/EditActions";
 import { Header } from "../components/Header";
+import { InsightScreen } from "../components/InsightScreen";
+import { InsightTicker } from "../components/InsightTicker";
 import { Keypad } from "../components/Keypad";
 import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
@@ -18,8 +21,10 @@ import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UpdateBanner } from "../components/UpdateBanner";
 import { UserMenu } from "../components/UserMenu";
+import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
+import { useInsights } from "../hooks/useInsights";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
 import {
@@ -35,7 +40,8 @@ import {
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
-import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
+import { APP_TIMEZONE, currentPeriodRange, toIsoDateOnly } from "../lib/periods";
+import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
 
@@ -274,6 +280,7 @@ function AppBody({ logout }: { logout: () => void }) {
     loading,
     openHistory,
     closeHistory,
+    setViewMode: setViewModeExternal,
     setSelectedKey,
     enterDrill,
     exitDrill,
@@ -291,6 +298,19 @@ function AppBody({ logout }: { logout: () => void }) {
   } = useExpenses();
 
   const calc = useCalculator();
+  const budget = useBudget();
+  const { getStatusNow } = budget;
+
+  /** Today's civil-day total (Jakarta) from the live list — optimistic and
+   * offline-cache friendly; feeds the insight engine with zero fetches. */
+  const todayTotal = useMemo(() => {
+    const { from, to } = currentPeriodRange("day");
+    return expenses.reduce((sum, item) => {
+      const at = new Date(item.occurredAt).getTime();
+      return at >= from.getTime() && at < to.getTime() ? sum + item.amount : sum;
+    }, 0);
+  }, [expenses]);
+  const { insights } = useInsights(budget.active, todayTotal);
   const [flash, setFlash] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
@@ -298,8 +318,16 @@ function AppBody({ logout }: { logout: () => void }) {
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
   const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
+  const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
+  const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
+  const [insightTickerVisible, setInsightTickerVisible] = useState(true);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isSpecial = viewMode === "special";
+  const isBudget = viewMode === "budget";
+  const isInsight = viewMode === "insight";
 
   // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
 
@@ -360,7 +388,6 @@ function AppBody({ logout }: { logout: () => void }) {
     if (wmOfflineRejected) showError("Butuh internet untuk Week/Month.");
   }, [wmOfflineRejected, showError]);
 
-  const isSpecial = viewMode === "special";
   const inDrill = specialPanel === "drill";
 
   const doFlash = useCallback(() => {
@@ -369,12 +396,39 @@ function AppBody({ logout }: { logout: () => void }) {
     flashTimer.current = setTimeout(() => setFlash(false), 350);
   }, []);
 
+  /** Budget screen errors surface through the same banner (soft, plan §4). */
+  useEffect(() => {
+    if (budget.error) showError(budget.error);
+  }, [budget.error, showError]);
+
+  /** Refresh budget aggregates whenever expenses change (plan §4: refresh on
+   * create/update/delete expense so spent/remaining stay live). */
+  useEffect(() => {
+    budget.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenses]);
+
   useEffect(() => {
     return () => {
       if (bannerTimer.current) clearTimeout(bannerTimer.current);
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
     };
   }, []);
+
+  /** Post-Enter budget feedback (plan §3): soft toast warning/over + Enter
+   * blink. Best-effort, never blocks the input; silent without a budget. */
+  const announceBudgetStatus = useCallback(async () => {
+    const budget = await getStatusNow();
+    if (budget === null || budget.status === "ok") return;
+    setBudgetNotice(budget.status);
+    setEnterFlash(budget.status);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => {
+      setBudgetNotice(false);
+      setEnterFlash(false);
+    }, 3000);
+  }, [getStatusNow]);
 
   /** Transaction-facing modes (day summary + drill) default to the newest row;
    * otherwise no auto-selection. Drop a selection that no longer resolves to
@@ -550,6 +604,8 @@ function AppBody({ logout }: { logout: () => void }) {
         const saved = await expensesApi.update(id, { amount });
         applyOptimisticUpdate(saved);
         doFlash();
+        // Amount is in — soft post-Enter budget feedback (plan §3).
+        void announceBudgetStatus();
         calc.clear();
         restoreHistory(editOrigin);
         clearEditOrigin();
@@ -596,6 +652,7 @@ function AppBody({ logout }: { logout: () => void }) {
       editOrigin,
       clearEditOrigin,
       restoreHistory,
+      announceBudgetStatus,
     ],
   );
 
@@ -630,6 +687,8 @@ function AppBody({ logout }: { logout: () => void }) {
     calc.clear();
     applyOptimisticCreate(optimistic);
     doFlash();
+    // Amount is in — soft post-Enter budget feedback (plan §3).
+    void announceBudgetStatus();
 
     if (!online) {
       await saveOfflineCreate(amount, occurredAt, optimistic.id);
@@ -667,9 +726,36 @@ function AppBody({ logout }: { logout: () => void }) {
     editOrigin,
     clearEditOrigin,
     restoreHistory,
+    announceBudgetStatus,
   ]);
 
-  // --- Special-mode data -------------------------------------------------------
+  // --- Budget actions (plan §3) ----------------------------------------------
+
+const openBudget = useCallback(() => {
+  setViewModeExternal("budget");
+}, [setViewModeExternal]);
+
+const closeBudget = useCallback(() => {
+  setViewModeExternal("calculator");
+}, [setViewModeExternal]);
+
+const openInsight = useCallback(() => {
+  setViewModeExternal("insight");
+}, [setViewModeExternal]);
+
+const closeInsight = useCallback(() => {
+  setViewModeExternal("calculator");
+}, [setViewModeExternal]);
+
+const handleBudgetCreate = useCallback(
+  async (payload: { type: "full" | "daily"; amount: number; startDate: string; endDate: string }) =>
+    budget.createBudget(payload),
+  [budget],
+);
+
+const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budget]);
+
+// --- Special-mode data -------------------------------------------------------
 
   const chartBuckets = useMemo(
     () =>
@@ -885,6 +971,16 @@ function AppBody({ logout }: { logout: () => void }) {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
+      if (isBudget || isInsight) {
+        // Budget / insight screen: Escape returns to the calculator; digits
+        // stay inert (insight is never an edit origin).
+        if (event.key === "Escape") {
+          if (isBudget) closeBudget();
+          else closeInsight();
+        }
+        return;
+      }
+
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
 
@@ -947,12 +1043,16 @@ function AppBody({ logout }: { logout: () => void }) {
     pendingUpdate,
     calc,
     isSpecial,
+    isBudget,
+    isInsight,
     inDrill,
     handleNavigate,
     handleSpecialEnter,
     handleEnter,
     exitDrill,
     closeHistory,
+    closeBudget,
+    closeInsight,
   ]);
 
   /** Clicking a chart bar: in day mode resolve to the first transaction in
@@ -1002,6 +1102,9 @@ function AppBody({ logout }: { logout: () => void }) {
     return formatDateShort(new Date(isoAtMidnight), APP_TIMEZONE);
   };
 
+  /** Current time reference for relative day labels (recomputed each render). */
+  const now = useMemo(() => new Date(), []);
+
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
@@ -1010,7 +1113,7 @@ function AppBody({ logout }: { logout: () => void }) {
       return expenses.map((item) => ({
         key: item.id,
         left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
-        mid: formatDateShort(new Date(item.occurredAt), APP_TIMEZONE),
+        mid: "Today",
         right: groupDigits(String(item.amount)),
         id: item.id,
         pending: pendingIds.has(item.id),
@@ -1018,10 +1121,41 @@ function AppBody({ logout }: { logout: () => void }) {
     }
     return groupExpensesByDay(expenses).map((day) => ({
       key: day.key,
-      left: dateLabelFromKey(day.key),
+      left: relativeDayLabel(day.key, now),
+      mid: dateLabelFromKey(day.key),
       right: groupDigits(String(day.total)),
     }));
-  }, [inDrill, period, expenses, pendingIds]);
+  }, [inDrill, period, expenses, pendingIds, now]);
+
+  const drillDayTotal = useMemo(
+    () =>
+      inDrill && drillDayKey
+        ? expenses
+            .filter(
+              (item) =>
+                dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
+            )
+            .reduce((sum, item) => sum + item.amount, 0)
+        : 0,
+    [inDrill, drillDayKey, expenses],
+  );
+
+  const chartTitle = useMemo(() => {
+    if (inDrill && drillDayKey) {
+      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
+    }
+    if (period === "day") {
+      return `Today · ${dateLabelFromKey(toIsoDateOnly(now, APP_TIMEZONE))} · ${groupDigits(String(expenses.reduce((sum, item) => sum + item.amount, 0)))}`;
+    }
+    return "";
+  }, [inDrill, drillDayKey, period, now, expenses, drillDayTotal]);
+
+  const effectivePeriodLabel = useMemo(() => {
+    if (inDrill && drillDayKey) {
+      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)}`;
+    }
+    return periodLabel;
+  }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);
 
   const deleteLabel = (() => {
     const expense = expenses.find((item) => item.id === deleteTarget);
@@ -1031,10 +1165,20 @@ function AppBody({ logout }: { logout: () => void }) {
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
       <Header
-        periodLabel={periodLabel}
+        periodLabel={effectivePeriodLabel}
         totalLabel={totalLabel}
         status={<ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />}
-        trailing={<UserMenu onLogout={logout} onAccountDeleted={logout} />}
+        trailing={
+          <>
+            <UserMenu
+              onLogout={logout}
+              onAccountDeleted={logout}
+              budgetStatus={budget.active?.status ?? null}
+              onOpenBudget={openBudget}
+              onOpenInsight={openInsight}
+            />
+          </>
+        }
       />
 
       <UpdateBanner />
@@ -1049,6 +1193,22 @@ function AppBody({ logout }: { logout: () => void }) {
         </div>
       )}
 
+      {budgetNotice !== false && !banner && (
+        <div
+          role="status"
+          data-testid="budget-notice"
+          className={`mb-2 shrink-0 rounded-lg border px-3 py-2 text-sm ${
+            budgetNotice === "over"
+              ? "border-red-900/70 bg-red-950/40 text-red-300"
+              : "border-amber-900/70 bg-amber-950/40 text-amber-300"
+          }`}
+        >
+          {budgetNotice === "over"
+            ? "Melebihi budget — pengeluaran tetap masuk."
+            : "Mendekati batas budget."}
+        </div>
+      )}
+
       <PeriodSelector
         highlight={isSpecial ? period : null}
         onOpen={openHistory}
@@ -1057,14 +1217,38 @@ function AppBody({ logout }: { logout: () => void }) {
       />
 
       {!isSpecial && (
-        <AmountDisplay
-          display={calc.display}
-          editing={calc.isEditing}
-          flash={flash}
-        />
+        <>
+          {!isSpecial && insightTickerVisible && (
+            <InsightTicker insights={insights} onOpen={openInsight} />
+          )}
+
+          <AmountDisplay
+            display={calc.display}
+            editing={calc.isEditing}
+            flash={flash}
+          />
+        </>
       )}
 
-      {isSpecial ? (
+      {isBudget ? (
+        <BudgetScreen
+          active={budget.active}
+          history={budget.history}
+          loading={budget.loading}
+          onBack={closeBudget}
+          onCreate={handleBudgetCreate}
+          onRemove={handleBudgetRemove}
+        />
+      ) : isInsight ? (
+        <InsightScreen
+          insights={insights}
+          hasBudget={budget.active !== null}
+          tickerVisible={insightTickerVisible}
+          onToggleTicker={() => setInsightTickerVisible((v) => !v)}
+          onBack={closeInsight}
+          onOpenBudget={openBudget}
+        />
+      ) : isSpecial ? (
         <>
           {inDrill ? (
             <BrowseList
@@ -1085,6 +1269,7 @@ function AppBody({ logout }: { logout: () => void }) {
               buckets={chartBuckets}
               selectedKey={chartSelectedKey}
               onSelect={handleBarSelect}
+              title={chartTitle}
             />
           </div>
 
@@ -1097,12 +1282,16 @@ function AppBody({ logout }: { logout: () => void }) {
               inDrill
                 ? transactionKey === null
                 : period === "day"
-                  ? expenses.length === 0
-                  : chartBuckets.length === 0
+                ? expenses.length === 0
+                : chartBuckets.length === 0
             }
             onNavigate={handleNavigate}
             navDisabled={navDisabled}
           />
+
+          {calc.isEditing && (
+            <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
+          )}
         </>
       ) : (
         <>
@@ -1111,6 +1300,7 @@ function AppBody({ logout }: { logout: () => void }) {
             onDigit={calc.pressDigit}
             onBackspace={calc.pressBackspace}
             onEnter={() => void handleEnter()}
+            enterFlash={enterFlash}
             enterDisabled={
               calc.amount <= 0 ||
               Boolean(

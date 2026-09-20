@@ -8,8 +8,6 @@ export interface BrowseRow {
   mid?: string;
   right: string;
   id?: string;
-  /** True when this row carries an unsynced offline mutation (badge N). */
-  pending?: boolean;
 }
 
 export interface BrowseListProps {
@@ -17,17 +15,6 @@ export interface BrowseListProps {
   selectedKey: string | null;
   onSelect: (key: string) => void;
 }
-
-/** Amber dot marking a row with an unsynced offline mutation. */
-export const PendingDot = memo(function PendingDot() {
-  return (
-    <span
-      aria-hidden="true"
-      data-testid="pending-dot"
-      className="mr-1.5 inline-block size-1.5 rounded-full bg-yellow-400 align-middle"
-    />
-  );
-});
 
 /**
  * Scrollable list of rows beneath the chart. Used in both browse mode (date or
@@ -71,20 +58,19 @@ function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
         onClick={() => onSelect(row.key)}
         data-testid={`browse-row-${row.key}`}
         aria-pressed={selected}
-        className={`flex w-full items-center justify-between px-1 py-3 text-left transition-colors ${
+        className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-3 text-left focus-visible:outline-none focus-visible:ring-0 transition-colors ${
           selected ? "bg-neutral-800/80" : "active:bg-neutral-900"
         }`}
       >
-        <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
+        <span className={`col-span-1 text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-400"}`}>
           {row.left}
         </span>
         {row.mid && (
-          <span className={`text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
+          <span className={`col-span-1 text-right text-sm ${selected ? "font-semibold text-neutral-100" : "text-neutral-500"}`}>
             {row.mid}
           </span>
         )}
-        <span className={`tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
-          {row.pending && <PendingDot />}
+        <span className={`col-span-1 text-right tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
           {row.right}
         </span>
       </button>

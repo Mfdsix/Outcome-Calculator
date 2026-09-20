@@ -88,7 +88,7 @@ export function useExpenses(): UseExpensesResult {
       .list(from, to, nowIso)
       .then((response) => {
         if (reloadIdRef.current !== reloadId) return;
-        setExpenses(response.expenses);
+        setExpenses(response.expenses.slice().sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()));
         setTotal(response.total);
         setError(null);
         setShowingCachedDay(false);
