@@ -119,7 +119,8 @@ export function hasAuthToken(): boolean {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
+  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
   let response: Response;
