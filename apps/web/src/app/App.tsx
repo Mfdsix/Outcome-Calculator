@@ -34,9 +34,9 @@ import {
   OfflineError,
   UnauthorizedError,
   authApi,
-  expensesApi,
   setAuthToken,
 } from "../lib/api";
+import { expensesRepository } from "../lib/repository";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
@@ -98,6 +98,8 @@ function isOfflineCause(cause: unknown): boolean {
  * Header reflects online state + sync progress.
  */
 export default function App() {
+  // Online-first: every runtime (browser PWA + Tauri) authenticates against
+  // the API with the same PIN → server-issued token flow.
   const lock = useLockFlow();
 
   // Sync the persisted theme onto <html> (main.tsx pre-paints; this keeps the
@@ -128,7 +130,7 @@ export default function App() {
 // Lock flow + session visit refresh
 // ---------------------------------------------------------------------------
 
-interface LockFlow {
+export interface LockFlow {
   unlocked: boolean;
   stage: "idle" | "locked" | "new-pin";
   busy: boolean;
@@ -600,7 +602,7 @@ function AppBody({ logout }: { logout: () => void }) {
         }
       }
       try {
-        const saved = await expensesApi.update(id, { amount });
+        const saved = await expensesRepository.update(id, { amount });
         applyOptimisticUpdate(saved);
         doFlash();
         // Amount is in — soft post-Enter budget feedback (plan §3).
@@ -695,7 +697,7 @@ function AppBody({ logout }: { logout: () => void }) {
     }
 
     try {
-      const saved = await expensesApi.create({ amount });
+      const saved = await expensesRepository.create({ amount });
       revertOptimisticCreate(optimistic);
       applyOptimisticCreate(saved);
     } catch (cause) {
@@ -923,7 +925,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     }
 
     try {
-      await expensesApi.remove(id);
+      await expensesRepository.delete(id);
       restoreHistory(editOrigin);
       clearEditOrigin();
     } catch (cause) {
@@ -1208,17 +1210,17 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       <Header
         periodLabel={effectivePeriodLabel}
         totalLabel={totalLabel}
-        status={<ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />}
+        status={
+          <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+        }
         trailing={
-          <>
-            <UserMenu
-              onLogout={logout}
-              onAccountDeleted={logout}
-              budgetStatus={budget.active?.status ?? null}
-              onOpenBudget={openBudget}
-              onOpenInsight={openInsight}
-            />
-          </>
+          <UserMenu
+            onLogout={logout}
+            onAccountDeleted={logout}
+            budgetStatus={budget.active?.status ?? null}
+            onOpenBudget={openBudget}
+            onOpenInsight={openInsight}
+          />
         }
       />
 

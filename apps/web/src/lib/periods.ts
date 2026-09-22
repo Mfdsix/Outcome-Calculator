@@ -1,4 +1,9 @@
-import { dayRange, last30DaysRange, last7DaysRange, toIsoWithOffset } from "@expense-app/shared";
+import {
+  dayRange,
+  last30DaysRange,
+  last7DaysRange,
+  toIsoWithOffset,
+} from "@expense-app/shared";
 import type { PeriodRange } from "@expense-app/shared";
 
 import type { Period } from "../types/ui";
@@ -22,7 +27,11 @@ export function toIsoDateOnly(now: Date = new Date(), tz = APP_TIMEZONE): string
   }).format(now);
 }
 
-/** Half-open [from, to) ISO range for the period containing `now`. */
+/**
+ * Rolling windows (web spec §5): W = last 7 days, M = last 30 days. All
+ * half-open [from, to) in Asia/Jakarta. The server remains the aggregation
+ * authority — these mirror its windows client-side.
+ */
 export function currentPeriodRange(period: Period, now: Date = new Date()): PeriodRange {
   switch (period) {
     case "day":

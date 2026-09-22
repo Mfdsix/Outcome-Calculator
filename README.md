@@ -114,6 +114,10 @@ user, never whole tables outside `_test` databases.
 | `npm run build`      | Build all workspaces               |
 | `npm run db:push`    | Push Prisma schema to Postgres     |
 | `npm run db:seed`    | Seed dev data (never in prod)      |
+| `npm run tauri:dev`  | Native desktop app (dev)           |
+| `npm run tauri:build`| Native desktop installers/bundles  |
+| `npm run tauri android build --apk` | Android APK (in `apps/web`) |
+| `npm run tauri ios build` | iOS archive (in `apps/web`, macOS only) |
 
 ## Auth: PIN as identity
 
@@ -208,6 +212,86 @@ rest are neutral gray. Pure CSS — no chart library.
 `npm run db:seed` generates ~250 expenses across 3 months (deterministic
 per-day amounts, weekdays/weekends vary), ending with today's pinned example
 set (35.000 / 25.000 / 42.000 / 25.500 = Rp127.500).
+
+## Native apps (Tauri): desktop, Android, iOS
+
+One React codebase, three runtimes — and it is **online-first everywhere**:
+the API server stays the source of truth; offline resilience (Today CRUD via
+the IndexedDB outbox + auto-sync) is identical in the browser and inside the
+native shells. The Tauri shell adds no local database and no local PIN gate.
+
+The API base URL is resolved per runtime:
+
+- **Browser/PWA** — relative base (same-origin `/api` behind the Vite dev
+  proxy or the reverse proxy). `VITE_API_URL` still overrides it (Docker).
+- **Native (Tauri)** — reads `VITE_API_URL` from `apps/web/.env.tauri`,
+  loaded automatically by the `--mode tauri` builds (`tauri:dev`,
+  `tauri:build`, android/ios builds). Set it to the LAN address of the API:
+  ```
+  VITE_API_URL=http://192.168.1.x:3000
+  ```
+
+Plain-HTTP LAN APIs need one platform exception each (already applied, but
+re-verify after `tauri android/ios init` regenerates these files):
+
+- **Android** — `android:usesCleartextTraffic="true"` on `<application>` in
+  `apps/web/src-tauri/gen/android/app/src/main/AndroidManifest.xml`.
+- **iOS** — `NSAppTransportSecurity → NSAllowsArbitraryLoads` in
+  `apps/web/src-tauri/gen/apple/app_iOS/Info.plist`.
+
+Both are development conveniences for talking to an HTTP API over the LAN —
+scope them per-domain (networkSecurityConfig / ATS per-domain exception) or
+remove them entirely once the API is behind HTTPS.
+
+### Desktop
+
+```bash
+cd apps/web
+npm run tauri:dev      # dev shell against the Vite dev server
+npm run tauri:build    # bundles .app/.dmg/.deb/...
+```
+
+Manual checklist (Phase B): login PIN (server auth) → CRUD online → kill the
+API/turn off WiFi → create offline → pending badge on → API back → auto-sync
+drains the outbox and the day list refreshes. No `expense.db` is ever created:
+data shown is server data.
+
+### Android (APK)
+
+One-time: `rustup target add aarch64-linux-android armv7-linux-androideabi
+i686-linux-android x86_64-linux-android`, Android SDK + NDK installed, then:
+
+```bash
+cd apps/web
+npx tauri android init                 # already done (gen/android exists)
+npx tauri android build --apk          # debug APK → sideload
+npx tauri android build --apk --target aarch64 # faster: arm64 only
+```
+
+Debug APK lands under
+`src-tauri/gen/android/app/build/outputs/apk/universal/debug/`. Release
+signing is administrative: generate a keystore, add the signing config to
+`gen/android/app/build.gradle.kts`, build the release APK/AAB.
+
+### iOS (simulator first, no account needed)
+
+One-time: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`, Xcode
+installed, then:
+
+```bash
+cd apps/web
+npx tauri ios dev      # simulator — free, no signing
+npx tauri ios build    # Xcode archive → IPA (signing separate)
+```
+
+### What's shared vs per-target
+
+- Same: every React component/hook, the API client, the offline outbox, the
+  lock flow (server auth), tests.
+- Different: only the shell (webview vs browser) and the API base URL
+  resolution. Build-level guards live in `src/lib/api.env.test.ts` — they
+  build both modes and assert the Tauri bundle inlines `VITE_API_URL` while
+  the PWA bundle keeps its service worker.
 
 ## Notes
 
