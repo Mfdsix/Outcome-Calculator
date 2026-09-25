@@ -153,14 +153,46 @@ describe("hourlyBuckets — allocation-aware", () => {
     expect(buckets[14]!.total).toBe(20000);
   });
 
-  it("WEEKLY expense contributes today's share to hour 0 bucket", () => {
+  it("WEEKLY expense is excluded from hourly buckets (not at 00:00)", () => {
     const expenses = [
       { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = hourlyBuckets(expenses, now);
-    // Today gets 100k allocation, bucketed into hour 0.
-    expect(buckets[0]!.total).toBe(100_000);
+    // WEEKLY prorated allocation must NOT appear in hourly chart at all.
+    expect(buckets[0]!.total).toBe(0);
     expect(buckets[10]!.total).toBe(0);
+    expect(buckets.every((b) => b.total === 0)).toBe(true);
+  });
+
+  it("MONTHLY expense is excluded from hourly buckets", () => {
+    const expenses = [
+      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+    ];
+    const buckets = hourlyBuckets(expenses, now);
+    expect(buckets.every((b) => b.total === 0)).toBe(true);
+  });
+
+  it("mixed NONE + WEEKLY: only NONE contributes to its actual hour", () => {
+    const expenses = [
+      { id: "n1", amount: 30_000, occurredAt: "2026-09-17T14:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+    ];
+    const buckets = hourlyBuckets(expenses, now);
+    // The WEEKLY 100k allocation is excluded; only the 30k NONE at 14:00 appears.
+    expect(buckets[14]!.total).toBe(30_000);
+    expect(buckets[0]!.total).toBe(0);
+    expect(buckets[10]!.total).toBe(0);
+    // Sum of all hourly buckets = 30k (no allocation leakage).
+    expect(buckets.reduce((sum, b) => sum + b.total, 0)).toBe(30_000);
+  });
+
+  it("WEEKLY expense on a past day still excluded from hourly buckets", () => {
+    // WEEKLY created Sep 15; Sep 17 hourly chart is for Sep 17 only.
+    const expenses = [
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-15T14:32:00+07:00" },
+    ];
+    const buckets = hourlyBuckets(expenses, now);
+    expect(buckets.every((b) => b.total === 0)).toBe(true);
   });
 });
 

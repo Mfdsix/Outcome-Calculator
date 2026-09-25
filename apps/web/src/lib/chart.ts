@@ -94,24 +94,15 @@ export function hourlyBuckets(
   for (const expense of expenses) {
     const expenseType = expense.allocationType ?? "NONE";
 
+    // Only NONE (non-allocated) expenses contribute to the hourly chart —
+    // their actual occurrence hour. WEEKLY/MONTHLY allocations are synthetic
+    // per-day spreads and must NOT appear as spending at "00:00" in the
+    // hourly breakdown (spec §Adv-3: hourly = actual occurrences only).
     if (!expenseType || expenseType === "NONE") {
-      // Non-allocated: bucket by actual hour.
       const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
       const key = civilKey(parts.year, parts.month, parts.day);
       if (key === todayKey && parts.hour >= 0 && parts.hour < 24) {
         totals[parts.hour] += expense.amount;
-      }
-    } else {
-      // Allocated: contribute the today portion to hour 0 (aggregate).
-      const allocation = effectiveAllocationForDay(
-        expense.amount,
-        expenseType,
-        expense.occurredAt,
-        APP_TIMEZONE,
-      );
-      const todayAmount = allocation.get(todayKey) ?? 0;
-      if (todayAmount > 0) {
-        totals[0] += todayAmount;
       }
     }
   }

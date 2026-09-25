@@ -242,14 +242,14 @@ export function useExpenses(): UseExpensesResult {
     setExpenses((current) => {
       const previous = current.find((item) => item.id === expense.id);
       if (previous) {
-        const dayRange = currentPeriodRange("day");
-        const oldContrib = expenseEffectiveAmount(previous, dayRange, APP_TIMEZONE);
-        const newContrib = expenseEffectiveAmount(expense, dayRange, APP_TIMEZONE);
+        const activeRange = currentPeriodRange(period);
+        const oldContrib = expenseEffectiveAmount(previous, activeRange, APP_TIMEZONE);
+        const newContrib = expenseEffectiveAmount(expense, activeRange, APP_TIMEZONE);
         setTotal((t) => t - oldContrib + newContrib);
       }
       return current.map((item) => (item.id === expense.id ? expense : item));
     });
-  }, []);
+  }, [period]);
 
   const applyOptimisticDelete = useCallback((id: string) => {
     let hadListEntry = false;
@@ -257,14 +257,14 @@ export function useExpenses(): UseExpensesResult {
       const previous = current.find((item) => item.id === id);
       if (previous) {
         hadListEntry = true;
-        const dayRange = currentPeriodRange("day");
-        const contrib = expenseEffectiveAmount(previous, dayRange, APP_TIMEZONE);
+        const activeRange = currentPeriodRange(period);
+        const contrib = expenseEffectiveAmount(previous, activeRange, APP_TIMEZONE);
         setTotal((t) => t - contrib);
       }
       return current.filter((item) => item.id !== id);
     });
     return { hadListEntry };
-  }, []);
+  }, [period]);
 
   /** Swap a local optimistic row id for the outbox temp id. Functional so it
    * never suffers the stale-closure problem of capture-at-call-time lists. */
