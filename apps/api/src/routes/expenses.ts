@@ -1,5 +1,5 @@
 import type { ExpenseListResponse, ExpenseDto, CreateExpensePayload, UpdateExpensePayload } from "@expense-app/shared";
-import { createExpenseSchema, updateExpenseSchema } from "@expense-app/shared";
+import { allocationAwareTotal, createExpenseSchema, updateExpenseSchema } from "@expense-app/shared";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyPluginAsync } from "fastify";
 
@@ -32,12 +32,13 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "Invalid amount." });
     }
 
-    const { amount, occurredAt } = parsed.data;
+    const { amount, allocationType, occurredAt } = parsed.data;
     const row = await prisma.expense.create({
       data: {
         amount: BigInt(amount),
         occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
         userId,
+        allocationType: allocationType ?? "NONE",
       },
     });
 
@@ -64,7 +65,12 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "from must be before to." });
     }
 
-    const rangeWhere = { userId, occurredAt: { gte: from, lt: to } };
+    // Expanded fetch window: pull up to 30 days before `from` so allocated
+    // expenses whose window overlaps [from, to) are included in totals and
+    // chart buckets (spec §Adv-4).
+    const fetchFrom = new Date(from.getTime() - 30 * 86_400_000);
+    const rangeWhere = { userId, occurredAt: { gte: fetchFrom, lt: to } };
+
     const [rows, aggregate] = await prisma.$transaction([
       prisma.expense.findMany({
         where: rangeWhere,
@@ -77,9 +83,18 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
     ]);
 
     const expenses: ExpenseDto[] = rows.map((row) => toExpenseDto(row, appTimezone));
+
+    // Allocation-aware total for the requested [from, to) range.
+    const requestedPeriod = { from, to };
+    const allocationTotal = allocationAwareTotal(
+      expenses,
+      requestedPeriod,
+      appTimezone,
+    );
+
     const response: ExpenseListResponse = {
       expenses,
-      total: aggregate._sum.amount === null ? 0 : Number(aggregate._sum.amount),
+      total: allocationTotal,
     };
     return reply.send(response);
   });
@@ -92,12 +107,24 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "Invalid amount." });
     }
 
+    const data: { amount?: bigint; allocationType?: string } = {};
+    if (parsed.data.amount !== undefined) {
+      data.amount = BigInt(parsed.data.amount);
+    }
+    if (parsed.data.allocationType !== undefined) {
+      data.allocationType = parsed.data.allocationType;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return reply.status(400).send({ error: "Nothing to update." });
+    }
+
     try {
       // Scoped update (like DELETE below): a foreign id updates nothing —
       // never mutate first and check ownership afterwards.
       const updated = await prisma.expense.updateMany({
         where: { id, userId },
-        data: { amount: BigInt(parsed.data.amount) },
+        data,
       });
       if (updated.count === 0) {
         return reply.status(404).send({ error: "Expense not found." });

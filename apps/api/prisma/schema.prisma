@@ -38,6 +38,11 @@ model Expense {
   userId String  @map("user_id") @db.Uuid
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  /// Allocation type for spreading the expense across days
+  /// (plan §Adv-1): "NONE" = raw, "WEEKLY"/"MONTHLY" = prorated.
+  /// Single push: legacy rows auto-adopt to "NONE" (like User.isActive).
+  allocationType String @default("NONE") @map("allocation_type")
+
   @@index([userId, occurredAt])
   @@map("expenses")
 }

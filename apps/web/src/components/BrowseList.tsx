@@ -8,6 +8,8 @@ export interface BrowseRow {
   mid?: string;
   right: string;
   id?: string;
+  /** Small allocation badge text (spec §Adv-3: e.g. "Weekly"). */
+  allocationBadge?: string;
 }
 
 export interface BrowseListProps {
@@ -73,6 +75,11 @@ function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
         <span className={`col-span-1 text-right tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
           {row.right}
         </span>
+        {row.allocationBadge && (
+          <span className="col-span-1 text-right text-[10px] text-neutral-500">
+            {row.allocationBadge}
+          </span>
+        )}
       </button>
     </li>
   );

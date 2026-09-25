@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTimeShort } from "@expense-app/shared";
+import {
+  TOKEN_REFRESH_MIN_INTERVAL_MS,
+  allocationAwareTotal,
+  getZonedParts,
+  formatDateShort,
+  formatTimeShort,
+} from "@expense-app/shared";
+import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
+import { AdvancedControls } from "../components/AdvancedControls";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
 import { BudgetScreen } from "../components/BudgetScreen";
@@ -312,13 +320,12 @@ function AppBody({ logout }: { logout: () => void }) {
   const { getStatusNow } = budget;
 
   /** Today's civil-day total (Jakarta) from the live list — optimistic and
-   * offline-cache friendly; feeds the insight engine with zero fetches. */
+   * offline-cache friendly; feeds the insight engine with zero fetches.
+   * Uses allocationAwareTotal so WEEKLY/MONTHLY expenses are prorated to
+   * today's share (spec §Adv-1/§Adv-4). */
   const todayTotal = useMemo(() => {
     const { from, to } = currentPeriodRange("day");
-    return expenses.reduce((sum, item) => {
-      const at = new Date(item.occurredAt).getTime();
-      return at >= from.getTime() && at < to.getTime() ? sum + item.amount : sum;
-    }, 0);
+    return allocationAwareTotal(expenses, { from, to }, APP_TIMEZONE);
   }, [expenses]);
   const { insights } = useInsights(budget.active, todayTotal);
   const [flash, setFlash] = useState(false);
@@ -378,14 +385,15 @@ function AppBody({ logout }: { logout: () => void }) {
     onUnauthorized: () => logoutRef.current(),
   });
 
-  // Back online → reload the authoritative day list (also clears cache staleness).
+  // Back online → reload the authoritative list (also clears cache staleness).
+  // Spec §Adv-4: also refresh W/M periods when back online.
   const prevOnlineRef = useRef(online);
   useEffect(() => {
-    if (online && !prevOnlineRef.current && period === "day") {
+    if (online && !prevOnlineRef.current) {
       void refresh();
     }
     prevOnlineRef.current = online;
-  }, [online, period, refresh]);
+  }, [online, refresh]);
 
   // Outbox drained → reload the day so temp rows become server rows.
   const prevPendingRef = useRef(0);
@@ -474,7 +482,7 @@ function AppBody({ logout }: { logout: () => void }) {
       calc.isEditing &&
       calc.editingId !== null &&
       original !== undefined &&
-      calc.amount !== original.amount;
+      (calc.amount !== original.amount || calc.allocationType !== (original.allocationType ?? "NONE"));
     if (dirty) {
       setShowUnsaved(true);
       return;
@@ -530,7 +538,7 @@ function AppBody({ logout }: { logout: () => void }) {
 
   /** Patch the snapshot for an offline update/delete of a real row. */
   const patchCacheRow = useCallback(
-    async (id: string, next: { amount: number } | null) => {
+    async (id: string, next: { amount: number; allocationType?: AllocationType } | null) => {
       await mutateTodayCache((cache) => {
         const previous = cache.expenses.find((item) => item.id === id);
         if (next === null) {
@@ -544,7 +552,9 @@ function AppBody({ logout }: { logout: () => void }) {
         return {
           ...cache,
           expenses: cache.expenses.map((item) =>
-            item.id === id ? { ...item, amount: next.amount } : item,
+            item.id === id
+              ? { ...item, amount: next.amount, allocationType: next.allocationType ?? item.allocationType }
+              : item,
           ),
           total: cache.total + delta,
         };
@@ -566,13 +576,13 @@ function AppBody({ logout }: { logout: () => void }) {
     async (amount: number, occurredAt: string, localId: string) => {
       const token = loadToken();
       if (!token) return;
-      const tempId = await queueOfflineCreate(token, { amount, occurredAt });
+      const tempId = await queueOfflineCreate(token, { amount, occurredAt, allocationType: "NONE" });
       replaceLocalId(localId, tempId, amount);
       markPending(tempId);
       // Persist into the today snapshot so an airplane reload keeps the row.
       await mutateTodayCache((cache) => ({
         ...cache,
-        expenses: [{ id: tempId, amount, occurredAt }, ...cache.expenses],
+        expenses: [{ id: tempId, amount, occurredAt, allocationType: "NONE" }, ...cache.expenses],
         total: cache.total + amount,
       }));
       bumpSync();
@@ -581,19 +591,28 @@ function AppBody({ logout }: { logout: () => void }) {
   );
 
   /** Commit a pending edit: optimistic update + API call + flash/error.
-   * Extracted so handleEnter and UpdateDialog confirm share one path. */
+   * Extracted so handleEnter and UpdateDialog confirm share one path.
+   * Includes allocationType from calc (spec §3: AdvancedControls). */
   const commitUpdate = useCallback(
     async (id: string, amount: number) => {
       const previous = expenses.find((item) => item.id === id);
+      const optimistic = { ...previous, amount, allocationType: calc.allocationType } as ExpenseDto;
       if (previous) {
-        applyOptimisticUpdate({ ...previous, amount });
+        applyOptimisticUpdate(optimistic);
+      }
+      const payload: { amount?: number; allocationType?: AllocationType } = {};
+      if (amount !== previous?.amount) {
+        payload.amount = amount;
+      }
+      if (calc.allocationType !== (previous?.allocationType ?? "NONE")) {
+        payload.allocationType = calc.allocationType;
       }
       if (!online && previous && !previous.id.startsWith("temp-")) {
         const token = loadToken();
         if (token) {
-          await queueOfflineUpdate(token, previous.id, amount);
+          await queueOfflineUpdate(token, previous.id, { amount, allocationType: calc.allocationType });
           markPending(previous.id);
-          await patchCacheRow(previous.id, { amount });
+          await patchCacheRow(previous.id, { amount, allocationType: calc.allocationType });
           bumpSync();
           calc.clear();
           restoreHistory(editOrigin);
@@ -602,7 +621,7 @@ function AppBody({ logout }: { logout: () => void }) {
         }
       }
       try {
-        const saved = await expensesRepository.update(id, { amount });
+        const saved = await expensesRepository.update(id, payload);
         applyOptimisticUpdate(saved);
         doFlash();
         // Amount is in — soft post-Enter budget feedback (plan §3).
@@ -623,8 +642,8 @@ function AppBody({ logout }: { logout: () => void }) {
           } else {
             const token = loadToken();
             if (token) {
-              await queueOfflineUpdate(token, previous.id, amount);
-              await patchCacheRow(previous.id, { amount });
+              await queueOfflineUpdate(token, previous.id, { amount, allocationType: calc.allocationType });
+              await patchCacheRow(previous.id, { amount, allocationType: calc.allocationType });
             }
           }
           markPending(previous.id);
@@ -664,14 +683,19 @@ function AppBody({ logout }: { logout: () => void }) {
     if (calc.isEditing && calc.editingId) {
       const id = calc.editingId;
       const previous = expenses.find((item) => item.id === id);
-      if (previous && previous.amount === amount) {
+      if (previous && previous.amount === amount && (previous.allocationType ?? "NONE") === calc.allocationType) {
         // No change — dismiss edit silently.
         calc.clear();
         clearEditOrigin();
         restoreHistory(editOrigin);
         return;
       }
-      if (previous && previous.amount !== amount) {
+      if (previous && previous.amount === amount && (previous.allocationType ?? "NONE") !== calc.allocationType) {
+        // AllocationType-only change — commit directly (no UpdateDialog needed).
+        void commitUpdate(id, amount);
+        return;
+      }
+      if (previous && (previous.amount !== amount || (previous.allocationType ?? "NONE") !== calc.allocationType)) {
         // Defer to UpdateDialog; keep the input so the user can review.
         setPendingUpdate({ id, amount });
         return;
@@ -680,10 +704,12 @@ function AppBody({ logout }: { logout: () => void }) {
     }
 
     const occurredAt = new Date().toISOString();
+    // Create from home is always NONE (spec §Adv-2: phase 1 budget/insight gap).
     const optimistic = {
       id: `optimistic-${Date.now()}`,
       amount,
       occurredAt,
+      allocationType: "NONE" as const,
     };
     calc.clear();
     applyOptimisticCreate(optimistic);
@@ -878,7 +904,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     const expense = expenses.find((item) => item.id === id);
     if (!expense) return;
     setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
-    calc.startEdit(expense.id, expense.amount);
+    calc.startEdit(expense.id, expense.amount, expense.allocationType);
     closeHistory();
   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
 
@@ -1107,6 +1133,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         right: groupDigits(String(item.amount)),
         id: item.id,
         pending: pendingIds.has(item.id),
+        allocationBadge: item.allocationType && item.allocationType !== "NONE"
+          ? item.allocationType === "WEEKLY" ? "Weekly" : "Monthly"
+          : undefined,
       }));
   }, [drillDayKey, expenses, inDrill, pendingIds]);
 
@@ -1134,6 +1163,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         right: groupDigits(String(item.amount)),
         id: item.id,
         pending: pendingIds.has(item.id),
+        allocationBadge: item.allocationType && item.allocationType !== "NONE"
+          ? item.allocationType === "WEEKLY" ? "Weekly" : "Monthly"
+          : undefined,
       }));
     }
     return groupExpensesByDay(expenses).map((day) => ({
@@ -1257,7 +1289,6 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           highlight={isSpecial ? period : null}
           onOpen={openHistory}
           onActiveTap={inDrill ? exitDrill : closeHistory}
-          disabledVisual={online ? [] : ["week", "month"]}
         />
       )}
 
@@ -1340,20 +1371,31 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         </>
       ) : (
         <>
-          <BarChart buckets={chartBuckets} />
+          {isHomeScreen && calc.isEditing ? (
+            <AdvancedControls
+              allocationType={calc.allocationType}
+              onToggle={(type) => {
+                const next = type === "NONE" ? "NONE" : type;
+                calc.setAllocationType(next);
+              }}
+            />
+          ) : (
+            <BarChart buckets={chartBuckets} />
+          )}
           <Keypad
             onDigit={calc.pressDigit}
             onBackspace={calc.pressBackspace}
             onEnter={() => void handleEnter()}
             enterFlash={enterFlash}
-            enterDisabled={
-              calc.amount <= 0 ||
-              Boolean(
-                calc.isEditing &&
-                calc.editingId &&
-                expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
-              )
-            }
+             enterDisabled={
+               calc.amount <= 0 ||
+               Boolean(
+                 calc.isEditing &&
+                 calc.editingId &&
+                 (expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount) &&
+                 ((expenses.find((i) => i.id === calc.editingId)?.allocationType ?? "NONE") === calc.allocationType),
+               )
+             }
           />
         </>
       )}

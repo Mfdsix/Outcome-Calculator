@@ -10,3 +10,4 @@ coverage/
 apps/api/generated/
 apps/web/dev-dist/
 .kilo
+/generated/prisma
