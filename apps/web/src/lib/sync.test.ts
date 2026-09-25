@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, UnauthorizedError } from "./api";
+import type { AllocationType } from "@expense-app/shared";
 import {
   clearOutbox,
   enqueueOp,
@@ -223,12 +224,12 @@ describe("drainOutbox", () => {
       payload: { amount: 50000, allocationType: "MONTHLY" },
     });
 
-    const receivedPayload: { amount: number; allocationType?: string } = {};
+     const receivedPayload: { amount?: number; allocationType?: AllocationType } = {};
     const api = {
       create: vi.fn(),
-      update: vi.fn(async (_id: string, payload: { amount: number; allocationType?: string }) => {
+      update: vi.fn(async (_id: string, payload: { amount?: number; allocationType?: AllocationType }) => {
         Object.assign(receivedPayload, payload);
-        return { id: "srv-real", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
+        return { id: "srv-real", amount: payload.amount ?? 0, occurredAt: "", allocationType: payload.allocationType };
       }),
       remove: vi.fn(),
     };
@@ -251,9 +252,9 @@ describe("drainOutbox", () => {
       payload: { amount: 200, allocationType: "WEEKLY" },
     });
 
-    let receivedCreatePayload: { amount: number; allocationType?: string } = {};
+    let receivedCreatePayload: { amount: number; allocationType?: AllocationType } = {} as { amount: number; allocationType?: AllocationType };
     const api = {
-      create: vi.fn(async (payload: { amount: number; allocationType?: string }) => {
+      create: vi.fn(async (payload: { amount: number; allocationType?: AllocationType }) => {
         receivedCreatePayload = payload;
         return { id: "real-coalesced", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
       }),

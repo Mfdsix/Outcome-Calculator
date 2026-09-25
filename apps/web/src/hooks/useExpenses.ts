@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { allocationAwareTotal } from "@expense-app/shared";
+import { allocationAwareTotal, expenseEffectiveAmount } from "@expense-app/shared";
 import type { ExpenseDto } from "@expense-app/shared";
 
 import { expensesRepository } from "../lib/repository";
@@ -242,7 +242,10 @@ export function useExpenses(): UseExpensesResult {
     setExpenses((current) => {
       const previous = current.find((item) => item.id === expense.id);
       if (previous) {
-        setTotal((t) => t - previous.amount + expense.amount);
+        const dayRange = currentPeriodRange("day");
+        const oldContrib = expenseEffectiveAmount(previous, dayRange, APP_TIMEZONE);
+        const newContrib = expenseEffectiveAmount(expense, dayRange, APP_TIMEZONE);
+        setTotal((t) => t - oldContrib + newContrib);
       }
       return current.map((item) => (item.id === expense.id ? expense : item));
     });
@@ -254,7 +257,9 @@ export function useExpenses(): UseExpensesResult {
       const previous = current.find((item) => item.id === id);
       if (previous) {
         hadListEntry = true;
-        setTotal((t) => t - previous.amount);
+        const dayRange = currentPeriodRange("day");
+        const contrib = expenseEffectiveAmount(previous, dayRange, APP_TIMEZONE);
+        setTotal((t) => t - contrib);
       }
       return current.filter((item) => item.id !== id);
     });

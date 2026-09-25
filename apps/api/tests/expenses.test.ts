@@ -137,13 +137,14 @@ describe("GET /api/expenses", () => {
        headers: authed,
      });
 
-     expect(response.statusCode).toBe(200);
-     const body = response.json();
-     // Expanded fetch window (30 days before `from`) includes the Sep 16
-     // expense. The allocation-aware total still reflects only Sep 17.
-     expect(body.expenses).toHaveLength(3);
-     expect(body.total).toBe(60000);
-     // Newest first.
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    // Expense from 16 Sep is outside [from, to) — excluded from the response
+    // list even though it was fetched (expanded window for allocation).
+    // The allocation-aware total still reflects only Sep 17.
+    expect(body.expenses).toHaveLength(2);
+    expect(body.total).toBe(60000);
+    // Newest first.
      expect(body.expenses[0]!.amount).toBe(25000);
      expect(body.expenses[1]!.amount).toBe(35000);
    });

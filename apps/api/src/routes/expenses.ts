@@ -84,7 +84,9 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
 
     const expenses: ExpenseDto[] = rows.map((row) => toExpenseDto(row, appTimezone));
 
-    // Allocation-aware total for the requested [from, to) range.
+    // Allocation-aware total for the requested [from, to) range — computed
+    // from the full expanded set so WEEKLY/MONTHLY expenses whose window
+    // overlaps [from, to) contribute their prorated share.
     const requestedPeriod = { from, to };
     const allocationTotal = allocationAwareTotal(
       expenses,
@@ -92,8 +94,17 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       appTimezone,
     );
 
+    // Separate history transactions from allocation sources: the returned
+    // list contains only expenses whose occurredAt falls within [from, to).
+    // Expenses outside the range but inside the expanded window exist solely
+    // to feed the allocation-aware total above and are not shown in history.
+    const inRangeExpenses = expenses.filter((e) => {
+      const t = new Date(e.occurredAt).getTime();
+      return t >= from.getTime() && t < to.getTime();
+    });
+
     const response: ExpenseListResponse = {
-      expenses,
+      expenses: inRangeExpenses,
       total: allocationTotal,
     };
     return reply.send(response);

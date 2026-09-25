@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   TOKEN_REFRESH_MIN_INTERVAL_MS,
   allocationAwareTotal,
+  expenseEffectiveAmount,
   getZonedParts,
   formatDateShort,
   formatTimeShort,
@@ -542,21 +543,37 @@ function AppBody({ logout }: { logout: () => void }) {
       await mutateTodayCache((cache) => {
         const previous = cache.expenses.find((item) => item.id === id);
         if (next === null) {
+          const contrib =
+            previous && cache.from && cache.to
+              ? expenseEffectiveAmount(previous, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
+              : previous?.amount ?? 0;
           return {
             ...cache,
             expenses: cache.expenses.filter((item) => item.id !== id),
-            total: cache.total - (previous?.amount ?? 0),
+            total: cache.total - contrib,
           };
         }
-        const delta = previous ? next.amount - previous.amount : 0;
+        const oldContrib =
+          previous && cache.from && cache.to
+            ? expenseEffectiveAmount(previous, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
+            : previous?.amount ?? 0;
+        const updatedExpense = {
+          ...previous,
+          amount: next.amount,
+          allocationType: next.allocationType ?? previous?.allocationType,
+        } as ExpenseDto;
+        const newContrib =
+          cache.from && cache.to
+            ? expenseEffectiveAmount(updatedExpense, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
+            : next.amount;
         return {
           ...cache,
           expenses: cache.expenses.map((item) =>
             item.id === id
-              ? { ...item, amount: next.amount, allocationType: next.allocationType ?? item.allocationType }
+              ? updatedExpense
               : item,
           ),
-          total: cache.total + delta,
+          total: cache.total - oldContrib + newContrib,
         };
       });
     },
