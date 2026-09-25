@@ -43,6 +43,7 @@ import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
 import { applyTheme } from "../lib/theme";
+import { loadTickerVisible, saveTickerVisible } from "../lib/tickerPref";
 import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
@@ -330,7 +331,14 @@ function AppBody({ logout }: { logout: () => void }) {
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
   const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
-  const [insightTickerVisible, setInsightTickerVisible] = useState(true);
+  const [insightTickerVisible, setInsightTickerVisible] = useState(loadTickerVisible);
+  const toggleTicker = useCallback(() => {
+    setInsightTickerVisible((v) => {
+      const next = !v;
+      saveTickerVisible(next);
+      return next;
+    });
+  }, []);
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1289,7 +1297,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           insights={insights}
           hasBudget={budget.active !== null}
           tickerVisible={insightTickerVisible}
-          onToggleTicker={() => setInsightTickerVisible((v) => !v)}
+          onToggleTicker={toggleTicker}
           onBack={closeInsight}
           onOpenBudget={openBudget}
         />
