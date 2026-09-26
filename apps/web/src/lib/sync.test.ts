@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, UnauthorizedError } from "./api";
+import type { AllocationType } from "@expense-app/shared";
 import {
   clearOutbox,
   enqueueOp,
@@ -55,6 +56,66 @@ describe("coalesceOps", () => {
       op({ type: "delete", realId: "temp-1", payload: { amount: 0 } }),
     ];
     expect(coalesceOps(ops)).toHaveLength(0);
+  });
+
+  it("create+update with allocationType → final allocationType wins (last wins)", () => {
+    const ops = [
+      op({ type: "create", tempId: "temp-1", payload: { amount: 10, allocationType: "NONE" } }),
+      op({ type: "update", realId: "temp-1", payload: { amount: 25, allocationType: "WEEKLY" } }),
+    ];
+    const result = coalesceOps(ops);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.payload.amount).toBe(25);
+    expect(result[0]!.payload.allocationType).toBe("WEEKLY");
+  });
+
+  it("create+update without allocationType → inherits create's allocationType", () => {
+    const ops = [
+      op({ type: "create", tempId: "temp-1", payload: { amount: 10, allocationType: "MONTHLY" } }),
+      op({ type: "update", realId: "temp-1", payload: { amount: 25 } }),
+    ];
+    const result = coalesceOps(ops);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.payload.allocationType).toBe("MONTHLY");
+  });
+
+  it("create+update chain: allocationType overridden by later update", () => {
+    const ops = [
+      op({ type: "create", tempId: "temp-1", payload: { amount: 10, allocationType: "NONE" } }),
+      op({ type: "update", realId: "temp-1", payload: { amount: 15, allocationType: "WEEKLY" } }),
+      op({ type: "update", realId: "temp-1", payload: { amount: 20, allocationType: "MONTHLY" } }),
+    ];
+    const result = coalesceOps(ops);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.payload.allocationType).toBe("MONTHLY");
+    expect(result[0]!.payload.amount).toBe(20);
+  });
+
+  it("create with WEEKLY + update with only allocationType NONE → final is NONE", () => {
+    const ops = [
+      op({ type: "create", tempId: "temp-1", payload: { amount: 50000, allocationType: "WEEKLY" } }),
+      op({ type: "update", realId: "temp-1", payload: { amount: 50000, allocationType: "NONE" } }),
+    ];
+    const result = coalesceOps(ops);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.payload.allocationType).toBe("NONE");
+  });
+
+  it("create+delete with WEEKLY → both dropped (allocationType irrelevant)", () => {
+    const ops = [
+      op({ type: "create", tempId: "temp-1", payload: { amount: 10, allocationType: "WEEKLY" } }),
+      op({ type: "delete", realId: "temp-1", payload: { amount: 0 } }),
+    ];
+    expect(coalesceOps(ops)).toHaveLength(0);
+  });
+
+  it("standalone update preserves its own allocationType (no create chain)", () => {
+    const ops = [
+      op({ type: "update", realId: "srv-real", payload: { amount: 99, allocationType: "WEEKLY" } }),
+    ];
+    const result = coalesceOps(ops);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.payload.allocationType).toBe("WEEKLY");
   });
 
   it("keeps independent ops around a create chain in FIFO order", () => {
@@ -129,6 +190,83 @@ describe("drainOutbox", () => {
     expect(result.dropped).toBe(0);
     expect(calls).toEqual(["create:150"]);
     expect(await readOutbox(TOKEN)).toHaveLength(0);
+  });
+
+  it("drain passes allocationType through create and update payloads", async () => {
+    await enqueueOp(TOKEN, {
+      type: "create",
+      tempId: "temp-a",
+      payload: { amount: 100, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "WEEKLY" },
+    });
+
+    const createPayload: { amount: number; allocationType?: string } = {};
+    const updatePayload: { amount: number; allocationType?: string } = {};
+    const api = {
+      create: vi.fn(async (payload: { amount: number; allocationType?: string }) => {
+        Object.assign(createPayload, payload);
+        return { id: "real-alloc", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
+      }),
+      update: vi.fn(async (_id: string, payload: { amount: number; allocationType?: string }) => {
+        Object.assign(updatePayload, payload);
+        return { id: "srv-alloc", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
+      }),
+      remove: vi.fn(),
+    };
+
+    await drainOutbox(TOKEN, api);
+    expect(createPayload.allocationType).toBe("WEEKLY");
+  });
+
+  it("drain passes allocationType through update payloads (real id update)", async () => {
+    await enqueueOp(TOKEN, {
+      type: "update",
+      realId: "srv-real",
+      payload: { amount: 50000, allocationType: "MONTHLY" },
+    });
+
+     const receivedPayload: { amount?: number; allocationType?: AllocationType } = {};
+    const api = {
+      create: vi.fn(),
+      update: vi.fn(async (_id: string, payload: { amount?: number; allocationType?: AllocationType }) => {
+        Object.assign(receivedPayload, payload);
+        return { id: "srv-real", amount: payload.amount ?? 0, occurredAt: "", allocationType: payload.allocationType };
+      }),
+      remove: vi.fn(),
+    };
+
+    const result = await drainOutbox(TOKEN, api);
+    expect(result.remaining).toBe(0);
+    expect(receivedPayload.allocationType).toBe("MONTHLY");
+    expect(receivedPayload.amount).toBe(50000);
+  });
+
+  it("drain: coalesced create+update sends only the final allocationType", async () => {
+    await enqueueOp(TOKEN, {
+      type: "create",
+      tempId: "temp-coalesce",
+      payload: { amount: 100, allocationType: "NONE" },
+    });
+    await enqueueOp(TOKEN, {
+      type: "update",
+      realId: "temp-coalesce",
+      payload: { amount: 200, allocationType: "WEEKLY" },
+    });
+
+    let receivedCreatePayload: { amount: number; allocationType?: AllocationType } = {} as { amount: number; allocationType?: AllocationType };
+    const api = {
+      create: vi.fn(async (payload: { amount: number; allocationType?: AllocationType }) => {
+        receivedCreatePayload = payload;
+        return { id: "real-coalesced", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
+      }),
+      update: vi.fn(),
+      remove: vi.fn(),
+    };
+
+    const result = await drainOutbox(TOKEN, api);
+    expect(result.remaining).toBe(0);
+    expect(receivedCreatePayload.allocationType).toBe("WEEKLY");
+    expect(receivedCreatePayload.amount).toBe(200);
+    expect(api.update).not.toHaveBeenCalled();
   });
 
   it("network failure (status 0) stops the drain with the head intact", async () => {

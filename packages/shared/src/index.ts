@@ -5,3 +5,4 @@ export * from "./types";
 export * from "./auth";
 export * from "./budget";
 export * from "./insights";
+export * from "./allocation";

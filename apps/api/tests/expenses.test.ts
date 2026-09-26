@@ -49,6 +49,52 @@ describe("POST /api/expenses", () => {
     expect(body.updatedAt).toBeTruthy();
   });
 
+  it("defaults allocationType to NONE when omitted", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 50000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().allocationType).toBe("NONE");
+  });
+
+  it("accepts allocationType WEEKLY on create", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 700000, occurredAt: "2026-09-17T12:30:00+07:00", allocationType: "WEEKLY" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().allocationType).toBe("WEEKLY");
+  });
+
+  it("accepts allocationType MONTHLY on create", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 3000000, allocationType: "MONTHLY" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().allocationType).toBe("MONTHLY");
+  });
+
+  it("rejects invalid allocationType values", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 50000, allocationType: "DAILY" },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
   it("defaults occurredAt to server time when omitted", async () => {
     const before = Date.now() - 1000;
     const response = await app.inject({
@@ -78,27 +124,29 @@ describe("POST /api/expenses", () => {
 });
 
 describe("GET /api/expenses", () => {
-  it("lists expenses in [from, to) with server-computed total", async () => {
-    await seedRows(userId, [
-      { amount: 35000, occurredAt: new Date("2026-09-17T02:00:00+07:00") },
-      { amount: 25000, occurredAt: new Date("2026-09-17T09:00:00+07:00") },
-      { amount: 42000, occurredAt: new Date("2026-09-16T10:00:00+07:00") },
-    ]);
+   it("lists expenses in [from, to) with server-computed total", async () => {
+     await seedRows(userId, [
+       { amount: 35000, occurredAt: new Date("2026-09-17T02:00:00+07:00") },
+       { amount: 25000, occurredAt: new Date("2026-09-17T09:00:00+07:00") },
+       { amount: 42000, occurredAt: new Date("2026-09-16T10:00:00+07:00") },
+     ]);
 
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
-      headers: authed,
-    });
+     const response = await app.inject({
+       method: "GET",
+       url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+       headers: authed,
+     });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
+    // Expense from 16 Sep is outside [from, to) — excluded from both the
+    // list and the raw total (exact range, no expanded fetch window).
     expect(body.expenses).toHaveLength(2);
     expect(body.total).toBe(60000);
     // Newest first.
-    expect(body.expenses[0]!.amount).toBe(25000);
-    expect(body.expenses[1]!.amount).toBe(35000);
-  });
+     expect(body.expenses[0]!.amount).toBe(25000);
+     expect(body.expenses[1]!.amount).toBe(35000);
+   });
 
   it("respects the half-open range upper bound", async () => {
     await seedRows(userId, [
@@ -147,6 +195,67 @@ describe("GET /api/expenses", () => {
     const body = response.json();
     expect(body.expenses).toEqual([]);
     expect(body.total).toBe(0);
+  });
+
+  it("total ignores allocation type: WEEKLY 700k counts in full on its own day", async () => {
+    await seedRows(userId, [
+      { amount: 700_000, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "WEEKLY" },
+    ]);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: authed,
+    });
+
+    const body = response.json();
+    expect(body.total).toBe(700_000); // raw sum as-is, no prorating
+  });
+
+   it("total ignores allocation type: expense outside the range contributes nothing", async () => {
+     // Expense created on 15 Sep no longer leaks into 17-19 Sep via any
+     // allocation window: exact range, raw sums only.
+     await seedRows(userId, [
+       { amount: 700_000, occurredAt: new Date("2026-09-15T10:00:00+07:00"), allocationType: "WEEKLY" },
+     ]);
+
+     const response = await app.inject({
+       method: "GET",
+       url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-19T00:00:00+07:00",
+       headers: authed,
+     });
+
+     const body = response.json();
+     expect(body.expenses).toEqual([]);
+     expect(body.total).toBe(0);
+   });
+
+  it("total ignores allocation type: NON-allocated expense returns full amount", async () => {
+    await seedRows(userId, [
+      { amount: 50_000, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "NONE" },
+    ]);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: authed,
+    });
+
+    expect(response.json().total).toBe(50_000);
+  });
+
+  it("total ignores allocation type: 1.000.001 WEEKLY counts whole, no remainder math", async () => {
+    await seedRows(userId, [
+      { amount: 1_000_001, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "WEEKLY" },
+    ]);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/expenses?from=2026-09-17T00:00:00+07:00&to=2026-09-18T00:00:00+07:00",
+      headers: authed,
+    });
+
+    expect(response.json().total).toBe(1_000_001);
   });
 });
 
@@ -199,6 +308,105 @@ describe("PATCH /api/expenses/:id", () => {
       payload: { amount: 50000 },
     });
     expect(response.statusCode).toBe(404);
+  });
+
+  it("updates only allocationType when amount is omitted", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 35000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+    const { id } = created.json();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/expenses/${id}`,
+      headers: authed,
+      payload: { allocationType: "WEEKLY" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().allocationType).toBe("WEEKLY");
+    expect(response.json().amount).toBe(35000);
+  });
+
+  it("updates only amount when allocationType is omitted", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 35000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+    const { id } = created.json();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/expenses/${id}`,
+      headers: authed,
+      payload: { amount: 50000 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().amount).toBe(50000);
+    expect(response.json().allocationType).toBe("NONE");
+  });
+
+  it("updates both amount and allocationType together", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 35000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+    const { id } = created.json();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/expenses/${id}`,
+      headers: authed,
+      payload: { amount: 700000, allocationType: "WEEKLY" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().amount).toBe(700000);
+    expect(response.json().allocationType).toBe("WEEKLY");
+  });
+
+  it("rejects invalid allocationType on patch", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 35000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+    const { id } = created.json();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/expenses/${id}`,
+      headers: authed,
+      payload: { allocationType: "DAILY" },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("rejects empty body (nothing to update)", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/expenses",
+      headers: authed,
+      payload: { amount: 35000, occurredAt: "2026-09-17T12:30:00+07:00" },
+    });
+    const { id } = created.json();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/expenses/${id}`,
+      headers: authed,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(400);
   });
 });
 

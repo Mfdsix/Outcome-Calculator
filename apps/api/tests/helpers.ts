@@ -79,13 +79,14 @@ export async function resetUsers(): Promise<void> {
 /** Seed rows owned by `userId`. */
 export async function seedRows(
   userId: string,
-  rows: Array<{ amount: number; occurredAt: Date }>,
+  rows: Array<{ amount: number; occurredAt: Date; allocationType?: string }>,
 ): Promise<void> {
   await prisma.expense.createMany({
     data: rows.map((row) => ({
       amount: BigInt(row.amount),
       occurredAt: row.occurredAt,
       userId,
+      allocationType: row.allocationType ?? "NONE",
     })),
   });
 }

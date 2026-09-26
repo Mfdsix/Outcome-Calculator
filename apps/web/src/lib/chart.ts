@@ -22,7 +22,9 @@ function civilKey(year: number, month: number, day: number): string {
 
 /**
  * Aggregate expenses into per-calendar-day totals (in APP_TIMEZONE) across
- * the given period range. The authoritative period total still comes from
+ * the given period range. Totals are raw sums as-is: each expense counts
+ * once, in full, on its occurredAt day. Allocation type/distribution never
+ * affects D/W/M totals. The authoritative period total still comes from
  * the server; these buckets only drive the chart.
  */
 export function dailyBuckets(
@@ -68,6 +70,7 @@ export function dailyBuckets(
 
 /**
  * Aggregate expenses into 24 hourly buckets for today (in APP_TIMEZONE).
+ * Every expense counts once, in full, at its actual occurrence hour.
  * Labels only render on hours divisible by 3 (00 03 06 09 12 15 18 21).
  */
 export function hourlyBuckets(
@@ -98,17 +101,32 @@ export function hourlyBuckets(
 
 /**
  * Sparse per-day aggregation for the W/M summary list — only days that
- * actually have expenses appear (no zero rows). In APP_TIMEZONE; newest-first
- * to match day-summary & drill ordering. Pure; safe to unit-test.
+ * actually have expenses appear (no zero rows). Raw sums as-is per occurredAt
+ * day; allocation never affects D/W/M totals.
+ * In APP_TIMEZONE; newest-first to match day-summary & drill ordering.
+ * Pure; safe to unit-test.
+ *
+ * When `range` is given, only days inside the half-open [from, to) window
+ * are returned, so browse selection + Enter-drill keys stay within the
+ * rendered chart buckets.
  */
-export function groupExpensesByDay(expenses: ExpenseDto[]): Array<{ key: string; total: number }> {
+export function groupExpensesByDay(
+  expenses: ExpenseDto[],
+  range?: PeriodRange,
+): Array<{ key: string; total: number }> {
   const totals = new Map<string, number>();
   for (const expense of expenses) {
     const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
     const key = civilKey(parts.year, parts.month, parts.day);
     totals.set(key, (totals.get(key) ?? 0) + expense.amount);
   }
-  return Array.from(totals.entries())
+  const rows = Array.from(totals.entries())
     .map(([key, total]) => ({ key, total }))
     .sort((a, b) => b.key.localeCompare(a.key));
+  if (!range) return rows;
+  const fromParts = getZonedParts(range.from, APP_TIMEZONE);
+  const toParts = getZonedParts(range.to, APP_TIMEZONE);
+  const fromKey = civilKey(fromParts.year, fromParts.month, fromParts.day);
+  const toKey = civilKey(toParts.year, toParts.month, toParts.day);
+  return rows.filter((row) => row.key >= fromKey && row.key < toKey);
 }

@@ -86,10 +86,10 @@ beforeEach(async () => {
     if (navigator.onLine === false) throw new ApiError(0, "offline");
     return { id: "created-1", amount: payload.amount, occurredAt: new Date().toISOString() };
   });
-  updateMock.mockImplementation(async (id, payload) => {
-    if (navigator.onLine === false) throw new ApiError(0, "offline");
-    return { id, amount: payload.amount, occurredAt: new Date().toISOString() };
-  });
+   updateMock.mockImplementation(async (id, payload) => {
+     if (navigator.onLine === false) throw new ApiError(0, "offline");
+     return { id, amount: payload.amount ?? 0, occurredAt: new Date().toISOString(), allocationType: payload.allocationType ?? "NONE" };
+   });
   removeMock.mockImplementation(async () => {
     if (navigator.onLine === false) throw new ApiError(0, "offline");
     return undefined;
@@ -283,27 +283,56 @@ describe("App — offline Today CRUD (plan §4/§6)", () => {
   });
 });
 
-describe("App — Week/Month stay online-only (plan §5)", () => {
-  it("blocks the Week switch while offline and shows the hint banner", async () => {
+describe("App — Week/Month expanded offline (plan §Adv-4)", () => {
+  it("opens Week while offline without an error banner — best-effort from cache", async () => {
+    listMock.mockResolvedValue({ expenses: [], total: 0 });
     const user = await renderUnlocked();
-    const callsBefore = listMock.mock.calls.length;
+    await screen.findByTestId("keypad");
 
     await setOnline(false);
     await user.click(screen.getByTestId("period-week"));
 
-    expect(await screen.findByTestId("error-banner")).toHaveTextContent("Butuh internet untuk Week/Month");
-    expect(screen.getByTestId("period-week")).not.toHaveAttribute("aria-current", "true");
-    // No W/M list fetch was issued after going offline.
-    expect(listMock.mock.calls.length).toBe(callsBefore);
+    // No error banner — W/M is no longer blocked offline (expanded best-effort).
+    expect(screen.queryByTestId("error-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("period-week")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("summary-empty")).toBeInTheDocument();
   });
 
-  it("blocks the Month switch while offline", async () => {
+  it("opens Month while offline without an error banner", async () => {
+    listMock.mockResolvedValue({ expenses: [], total: 0 });
     const user = await renderUnlocked();
+    await screen.findByTestId("keypad");
 
     await setOnline(false);
     await user.click(screen.getByTestId("period-month"));
-    expect(await screen.findByTestId("error-banner")).toHaveTextContent("Butuh internet untuk Week/Month");
-    expect(screen.getByTestId("period-month")).not.toHaveAttribute("aria-current", "true");
+
+    expect(screen.queryByTestId("error-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("period-month")).toHaveAttribute("aria-current", "true");
+  });
+
+  it("back online refreshes W/M data", async () => {
+    const w1 = { id: "w1", amount: 1000, occurredAt: new Date().toISOString() };
+    listMock.mockImplementation(async () => {
+      if (navigator.onLine === false) throw new ApiError(0, "offline");
+      return { expenses: [w1], total: 1000 };
+    });
+    const user = await renderUnlocked();
+
+    // First load: triggers day fetch.
+    await screen.findByTestId("keypad");
+    await setOnline(false);
+    await user.click(screen.getByTestId("period-week"));
+    expect(screen.queryByTestId("error-banner")).not.toBeInTheDocument();
+
+    // Go back online — navigate to day and back to week to trigger fetch.
+    await setOnline(true);
+    await user.click(screen.getByTestId("period-day"));
+    await user.click(screen.getByTestId("period-week"));
+
+    // W/M summary groups by day; the row key is the civil day (YYYY-MM-DD).
+    const rows = screen.getAllByTestId(/^summary-row-/);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
   });
 });
 
@@ -322,14 +351,15 @@ describe("App — connection indicator (plan §7)", () => {
     await vi.waitFor(() => expect(screen.queryByTestId("conn-indicator-label")).toBeNull(), {
       timeout: 3000,
     });
-     void user;
+    void user;
    });
 
-   it("dims W/M buttons while offline (disabledVisual)", async () => {
-    const user = await renderUnlocked();
-    await setOnline(false);
-    expect(screen.getByTestId("period-week").className).toContain("text-neutral-600");
-    expect(screen.getByTestId("period-month").className).toContain("text-neutral-600");
-    void user;
-  });
+   it("does not dim W/M buttons while offline (expanded behavior, spec §Adv-4)", async () => {
+     const user = await renderUnlocked();
+     await setOnline(false);
+     // W/M is no longer dimmed offline — expanded best-effort from cache.
+     expect(screen.getByTestId("period-week").className).not.toContain("text-neutral-600");
+     expect(screen.getByTestId("period-month").className).not.toContain("text-neutral-600");
+     void user;
+   });
 });

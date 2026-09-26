@@ -1,4 +1,4 @@
-import type { ExpenseDto } from "@expense-app/shared";
+import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 import { UnauthorizedError, expensesApi } from "./api";
 import {
@@ -30,7 +30,7 @@ import {
 /** Enqueue an offline create; returns the temp id used in the UI list. */
 export async function queueOfflineCreate(
   token: string,
-  payload: { amount: number; occurredAt: string },
+  payload: { amount: number; occurredAt: string; allocationType?: AllocationType },
   tempId = newTempId(),
 ): Promise<string> {
   await enqueueOp(token, { type: "create", tempId, payload });
@@ -40,9 +40,9 @@ export async function queueOfflineCreate(
 export async function queueOfflineUpdate(
   token: string,
   realId: string,
-  amount: number,
+  payload: { amount: number; allocationType?: AllocationType },
 ): Promise<void> {
-  await enqueueOp(token, { type: "update", realId, payload: { amount } });
+  await enqueueOp(token, { type: "update", realId, payload });
 }
 
 export async function queueOfflineDelete(token: string, realId: string): Promise<void> {
@@ -56,6 +56,7 @@ export async function queueOfflineDelete(token: string, realId: string): Promise
 /**
  * Collapse an op list per plan §6. Only a leading run of ops that forms a
  * create-head chain coalesces; ops on real ids are kept as-is.
+ * allocationType is coalesced with "last wins" semantics.
  */
 export function coalesceOps(ops: OutboxOp[]): OutboxOp[] {
   const result: OutboxOp[] = [];
@@ -65,6 +66,7 @@ export function coalesceOps(ops: OutboxOp[]): OutboxOp[] {
     if (op.type === "create") {
       let j = i + 1;
       let finalAmount = op.payload.amount;
+      let finalAllocationType = op.payload.allocationType ?? "NONE";
       let deleted = false;
       while (j < ops.length) {
         const next = ops[j]!;
@@ -72,14 +74,19 @@ export function coalesceOps(ops: OutboxOp[]): OutboxOp[] {
           (next.type === "update" || next.type === "delete") &&
           (next.realId === op.tempId || next.tempId === op.tempId);
         if (!targetsCreate) break;
-        if (next.type === "update") finalAmount = next.payload.amount;
+        if (next.type === "update") {
+          finalAmount = next.payload.amount;
+          if (next.payload.allocationType !== undefined) {
+            finalAllocationType = next.payload.allocationType;
+          }
+        }
         if (next.type === "delete") deleted = true;
         j += 1;
       }
       if (!deleted) {
         result.push({
           ...op,
-          payload: { ...op.payload, amount: finalAmount },
+          payload: { ...op.payload, amount: finalAmount, allocationType: finalAllocationType },
         });
       }
       i = j; // consumed the create + its chain (or dropped everything)
@@ -149,15 +156,19 @@ export async function drainOutbox(
   while (ops.length > 0) {
     const op = ops[0]!;
 
-    try {
+     try {
       if (op.type === "create") {
         const saved = await api.create({
           amount: op.payload.amount,
+          allocationType: op.payload.allocationType,
           ...(op.payload.occurredAt ? { occurredAt: op.payload.occurredAt } : {}),
         });
         await advance(op.tempId, saved.id);
       } else if (op.type === "update") {
-        await api.update(op.realId!, { amount: op.payload.amount });
+        await api.update(op.realId!, {
+          amount: op.payload.amount,
+          allocationType: op.payload.allocationType,
+        });
         await advance(undefined, undefined);
       } else {
         await api.remove(op.realId!);

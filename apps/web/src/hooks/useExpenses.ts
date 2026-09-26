@@ -5,7 +5,7 @@ import type { ExpenseDto } from "@expense-app/shared";
 import { expensesRepository } from "../lib/repository";
 import { formatIDRAbbreviated } from "../lib/currency";
 import { civilDayKey, loadTodayCache, saveTodayCache, type TodayCache } from "../lib/offlineDb";
-import { periodQuery, PERIOD_LABEL } from "../lib/periods";
+import { currentPeriodRange, periodQuery, PERIOD_LABEL, APP_TIMEZONE } from "../lib/periods";
 import type { Period, SpecialPanel, ViewMode } from "../types/ui";
 
 export interface UseExpensesResult {
@@ -105,12 +105,17 @@ export function useExpenses(): UseExpensesResult {
           });
         }
       })
-      .catch(async (cause: unknown) => {
+       .catch(async (cause: unknown) => {
         if (reloadIdRef.current !== reloadId) return;
         const status = (cause as { status?: number }).status ?? 0;
         if (status === 0) {
-          // Network failure: fall back to the cached day (day only).
-          setDayFetchFailed(true);
+          // Network failure: fall back to cached data.
+          if (period === "day") {
+            setDayFetchFailed(true);
+          } else {
+            // W/M offline: don't mark day fetch failed (spec §Adv-4).
+            setDayFetchFailed(false);
+          }
           if (period === "day") {
             const cache: TodayCache | null = await loadTodayCache();
             if (reloadIdRef.current !== reloadId) return;
@@ -138,10 +143,39 @@ export function useExpenses(): UseExpensesResult {
             setShowingCachedDay(true);
             return;
           }
-          // W/M offline (already guarded in openHistory) — empty list + hint.
-          setExpenses([]);
-          setTotal(0);
-          setError("Butuh internet untuk Week/Month.");
+          // W/M offline (expanded): compute from in-memory + cache best-effort.
+          // (spec §Adv-4: jangan blokir, hitung dari cache)
+          const cache: TodayCache | null = await loadTodayCache();
+          if (reloadIdRef.current !== reloadId) return;
+          if (cache) {
+            // Merge existing in-memory expenses with cache for best-effort W/M.
+            setExpenses((current) => {
+              const known = new Set(cache.expenses.map((item) => item.id));
+              const extras = current.filter((item) => !known.has(item.id));
+              const merged = [...extras, ...cache.expenses].sort(
+                (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+              );
+              // Raw total as-is: sum amounts whose occurredAt falls in [from, to).
+              const range = currentPeriodRange(period);
+              const fromMs = range.from.getTime();
+              const toMs = range.to.getTime();
+              const computedTotal = merged.reduce(
+                (sum, item) => {
+                  const t = new Date(item.occurredAt).getTime();
+                  return t >= fromMs && t < toMs ? sum + item.amount : sum;
+                },
+                0,
+              );
+              setTotal(computedTotal);
+              return merged;
+            });
+            setShowingCachedDay(true);
+            setError(null);
+            return;
+          }
+          // No cache at all: keep existing in-memory state (limited offline).
+          setShowingCachedDay(true);
+          setError(null);
           return;
         }
         setError(cause instanceof Error ? cause.message : "Could not save expense.\nTry again.");
@@ -156,17 +190,9 @@ export function useExpenses(): UseExpensesResult {
     return () => inflightRef.current?.abort();
   }, [refresh]);
 
-  /** Open the special browse view for `next`; resets panel + selection. */
+  /** Open the special browse view for `next`; resets panel + selection.
+   *  (spec §Adv-4: Expanded W/M — don't block offline, compute from cache best-effort) */
   const openHistory = useCallback((next: Period) => {
-    if (next !== "day" && !navigator.onLine) {
-      // Plan §5: Week/Month stay online-only; refuse the switch offline.
-      setWmOfflineRejected(true);
-      setPeriodState("day");
-      setViewMode("special");
-      setSpecialPanel("summary");
-      setSelectedKeyState(null);
-      return;
-    }
     setWmOfflineRejected(false);
     setPeriodState(next);
     setViewMode("special");
