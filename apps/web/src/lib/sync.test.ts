@@ -199,16 +199,16 @@ describe("drainOutbox", () => {
       payload: { amount: 100, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "WEEKLY" },
     });
 
-    const createPayload: { amount: number; allocationType?: string } = {};
-    const updatePayload: { amount: number; allocationType?: string } = {};
+    const createPayload: { amount?: number; allocationType?: AllocationType } = {};
+    const updatePayload: { amount?: number; allocationType?: AllocationType } = {};
     const api = {
-      create: vi.fn(async (payload: { amount: number; allocationType?: string }) => {
+      create: vi.fn(async (payload: { amount: number; allocationType?: AllocationType }) => {
         Object.assign(createPayload, payload);
         return { id: "real-alloc", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
       }),
-      update: vi.fn(async (_id: string, payload: { amount: number; allocationType?: string }) => {
+      update: vi.fn(async (_id: string, payload: { amount?: number; allocationType?: AllocationType }) => {
         Object.assign(updatePayload, payload);
-        return { id: "srv-alloc", amount: payload.amount, occurredAt: "", allocationType: payload.allocationType };
+        return { id: "srv-alloc", amount: payload.amount ?? 0, occurredAt: "", allocationType: payload.allocationType };
       }),
       remove: vi.fn(),
     };
