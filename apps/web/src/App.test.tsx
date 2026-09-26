@@ -316,7 +316,7 @@ describe("App — special mode (D/W/M browse)", () => {
     expect(screen.queryByTestId(`bar-${toKey}`)).not.toBeInTheDocument();
   });
 
-  it("month period shows 30 daily bars with rolling range", async () => {
+  it("month period shows 2-day pair bars with rolling range", async () => {
     listMock.mockResolvedValue({ expenses: [], total: 0 });
     const user = userEvent.setup();
     await renderUnlocked();
@@ -324,10 +324,46 @@ describe("App — special mode (D/W/M browse)", () => {
     await user.click(screen.getByTestId("period-month")); // single tap opens history
     await screen.findByTestId("summary-empty");
 
+    // 31-day window, end-anchored: 15 pairs + the oldest day standing alone.
+    expect(screen.getAllByTestId(/^bar-\d{4}-\d{2}-\d{2}$/)).toHaveLength(16);
     const expected = last30DaysRange(new Date(), "Asia/Jakarta");
     const from = getZonedParts(expected.from, "Asia/Jakarta");
     const fromKey = `${from.year}-${String(from.month).padStart(2, "0")}-${String(from.day).padStart(2, "0")}`;
     expect(screen.getByTestId(`bar-${fromKey}`)).toBeInTheDocument();
+  });
+
+  it("month summary stays daily while the chart pairs; Enter drills the whole pair", async () => {
+    const day = 86_400_000;
+    const now = Date.now();
+    const iso = (t: number): string => new Date(t).toISOString();
+    // End-anchored pairs: (yesterday, today) = 20k + 10k;
+    // (5d ago, 4d ago) = 5k + 7k.
+    listMock.mockResolvedValue({
+      expenses: [
+        { id: "a", amount: 10_000, occurredAt: iso(now) },
+        { id: "b", amount: 20_000, occurredAt: iso(now - day) },
+        { id: "c", amount: 5_000, occurredAt: iso(now - 5 * day) },
+        { id: "d", amount: 7_000, occurredAt: iso(now - 4 * day) },
+      ],
+      total: 42_000,
+    });
+    const user = userEvent.setup();
+    await renderUnlocked();
+
+    await user.click(screen.getByTestId("period-month"));
+    await screen.findByTestId("summary-list");
+
+    // History list stays per-day: 4 daily rows, newest first.
+    const rows = screen.getAllByTestId(/^summary-row-/);
+    expect(rows).toHaveLength(4);
+
+    // Enter on the auto-selected newest day drills its whole pair.
+    await user.click(screen.getByTestId("key-enter"));
+    expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
+    expect(screen.getByTestId("browse-row-a")).toBeInTheDocument();
+    expect(screen.getByTestId("browse-row-b")).toBeInTheDocument();
+    expect(screen.queryByTestId("browse-row-c")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chart-title")).toHaveTextContent("30.000");
   });
 
   it("digits are inert in special mode (no create), but keypad + key-0 still present", async () => {

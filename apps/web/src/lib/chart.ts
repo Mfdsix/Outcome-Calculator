@@ -14,6 +14,12 @@ export interface ChartBucket {
   isCurrent: boolean;
   /** Granularity: "hour" for day view, "day" for week/month. */
   kind: "hour" | "day";
+  /**
+   * Month-pair second day ("YYYY-MM-DD"). Set only on 2-day pair buckets;
+   * drill-down covers [key, endKey]. Absent on orphan singles so a drill
+   * never leaks into the neighboring pair.
+   */
+  endKey?: string;
 }
 
 function civilKey(year: number, month: number, day: number): string {
@@ -129,4 +135,80 @@ export function groupExpensesByDay(
   const fromKey = civilKey(fromParts.year, fromParts.month, fromParts.day);
   const toKey = civilKey(toParts.year, toParts.month, toParts.day);
   return rows.filter((row) => row.key >= fromKey && row.key < toKey);
+}
+
+/**
+ * Aggregate expenses into 2-day buckets for the month view
+ * (in APP_TIMEZONE). Pairs are anchored at the range END — […, d3+d4, d1+d2,
+ * today+yesterday] — so today is always paired and any orphan single (odd
+ * window length, e.g. the 31-day last-30 window) lands on the oldest,
+ * least-visible day. A 30-day window renders ~15 candles instead of 30
+ * slivers. Raw sums as-is per pair; allocation never affects D/W/M totals.
+ *
+ * Key = first day civil key ("YYYY-MM-DD"), label = first day number,
+ * isCurrent = today falls inside the pair. Pure; safe to unit-test.
+ */
+export function twoDayBuckets(
+  range: PeriodRange,
+  expenses: ExpenseDto[],
+  now: Date,
+): ChartBucket[] {
+  const start = getZonedParts(range.from, APP_TIMEZONE);
+  const end = getZonedParts(range.to, APP_TIMEZONE);
+  const today = getZonedParts(now, APP_TIMEZONE);
+  const todayKey = civilKey(today.year, today.month, today.day);
+
+  // Collect civil dates from range start to range end (exclusive).
+  const dates: Array<{ year: number; month: number; day: number }> = [];
+  let cursor = { year: start.year, month: start.month, day: start.day };
+  const endKey = civilKey(end.year, end.month, end.day);
+  for (let guard = 0; guard < 62; guard += 1) {
+    const key = civilKey(cursor.year, cursor.month, cursor.day);
+    if (key >= endKey) break;
+    dates.push(cursor);
+    cursor = addCivilDays(cursor, 1);
+  }
+
+  const totals = new Map<string, number>();
+  for (const expense of expenses) {
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    totals.set(key, (totals.get(key) ?? 0) + expense.amount);
+  }
+
+  const toKey = (d: { year: number; month: number; day: number }): string =>
+    civilKey(d.year, d.month, d.day);
+
+  // Chunk from the end (newest first), then restore ascending order.
+  const pairs: ChartBucket[] = [];
+  let index = dates.length;
+  while (index > 0) {
+    if (index >= 2) {
+      const first = dates[index - 2]!;
+      const second = dates[index - 1]!;
+      const firstKey = toKey(first);
+      const secondKey = toKey(second);
+      pairs.unshift({
+        key: firstKey,
+        label: String(first.day),
+        total: (totals.get(firstKey) ?? 0) + (totals.get(secondKey) ?? 0),
+        isCurrent: firstKey === todayKey || secondKey === todayKey,
+        kind: "day" as const,
+        endKey: secondKey,
+      });
+      index -= 2;
+    } else {
+      const only = dates[0]!;
+      const onlyKey = toKey(only);
+      pairs.unshift({
+        key: onlyKey,
+        label: String(only.day),
+        total: totals.get(onlyKey) ?? 0,
+        isCurrent: onlyKey === todayKey,
+        kind: "day" as const,
+      });
+      index -= 1;
+    }
+  }
+  return pairs;
 }

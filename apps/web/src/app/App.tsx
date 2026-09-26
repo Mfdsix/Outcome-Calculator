@@ -44,7 +44,7 @@ import {
   setAuthToken,
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
-import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
@@ -796,7 +796,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     () =>
       period === "day"
         ? hourlyBuckets(expenses, new Date())
-        : dailyBuckets(period, currentPeriodRange(period), expenses, new Date()),
+        : period === "week"
+          ? dailyBuckets(period, currentPeriodRange(period), expenses, new Date())
+          : twoDayBuckets(currentPeriodRange(period), expenses, new Date()),
     [period, expenses],
   );
 
@@ -817,19 +819,36 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
       return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
     }
-    // W/M: selectedKey is already a bucket (day) key.
+    if (period === "month") {
+      // The list selects days but the chart shows pairs — highlight the pair
+      // containing the selected day (or the pair itself as fallback).
+      const pair = selectedKey
+        ? chartBuckets.find((bucket) => bucket.key === selectedKey || bucket.endKey === selectedKey)
+        : undefined;
+      return pair?.key ?? selectedKey;
+    }
+    // W: selectedKey is already a bucket (day) key.
     return selectedKey;
-  }, [inDrill, period, selectedKey, expenses, drillDayKey]);
+  }, [inDrill, period, selectedKey, expenses, drillDayKey, chartBuckets]);
 
   /**
    * Day keys for W/M summary navigation, in the same descending order the sparse
-   * SummaryList renders (newest first). Using this (instead of chartBuckets)
-   * keeps selection + up/down + disabled state aligned to the rows actually
-   * shown, so the highlight never vanishes on a zero-data day.
+   * SummaryList renders (newest first). The month list stays daily even though
+   * its chart pairs days. Using this (instead of chartBuckets) keeps selection
+   * + up/down + disabled state aligned to the rows actually shown, so the
+   * highlight never vanishes on a zero-data day.
    */
-  const navDayKeys = useMemo(
-    () => groupExpensesByDay(expenses, currentPeriodRange(period)).map((d) => d.key),
-    [expenses, period],
+  const navDayKeys = useMemo(() => {
+    return groupExpensesByDay(expenses, currentPeriodRange(period)).map((d) => d.key);
+  }, [expenses, period]);
+
+  /** Month-drill pair coverage from the chart buckets (never date math). */
+  const drillPairEndKey = useMemo(
+    () =>
+      period === "month" && inDrill && drillDayKey
+        ? (chartBuckets.find((bucket) => bucket.key === drillDayKey)?.endKey ?? null)
+        : null,
+    [period, inDrill, drillDayKey, chartBuckets],
   );
 
   const moveTransactionSelection = useCallback(
@@ -908,7 +927,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       left: period === "day" && !inDrill,
       right: period === "month" && !inDrill,
     };
-  }, [inDrill, period, expenses, chartBuckets, selectedKey]);
+  }, [inDrill, period, expenses, chartBuckets, navDayKeys, selectedKey]);
 
   const handleEdit = useCallback(() => {
     const id = inDrill ? transactionKey : selectedKey;
@@ -925,10 +944,23 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       handleEdit();
       return;
     }
-    // Week/Month summary: Enter drills into the highlighted day bucket.
     const fallback = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
     const target = selectedKey ?? fallback;
-    if (target && chartBuckets.some((bucket) => bucket.key === target)) {
+    if (!target) return;
+    if (period === "month") {
+      // The list selects days but the chart shows pairs — drill the pair
+      // containing the highlighted day (or the pair itself as fallback).
+      const pair = chartBuckets.find(
+        (bucket) => bucket.key === target || bucket.endKey === target,
+      );
+      if (pair) {
+        setDrillDayKey(pair.key);
+        enterDrill();
+      }
+      return;
+    }
+    // Week summary: Enter drills into the highlighted day bucket.
+    if (chartBuckets.some((bucket) => bucket.key === target)) {
       setDrillDayKey(target.slice(0, 10));
       enterDrill();
     }
@@ -1110,8 +1142,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   ]);
 
   /** Clicking a chart bar: in day mode resolve to the first transaction in
-   * that hour bucket (selections stay in the transaction-id domain); otherwise
-   * the bucket key is the selection directly. */
+   * that hour bucket (selections stay in the transaction-id domain); in month
+   * mode resolve the pair to a day with transactions (the list stays daily);
+   * otherwise the bucket key is the selection directly. */
   const handleBarSelect = useCallback(
     (key: string) => {
       if (period === "day" && !inDrill) {
@@ -1125,19 +1158,34 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           return;
         }
       }
+      if (period === "month" && !inDrill) {
+        const pair = chartBuckets.find((bucket) => bucket.key === key);
+        if (pair) {
+          const hasTx = (dayKey: string): boolean =>
+            expenses.some(
+              (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey,
+            );
+          // Prefer the pair start so Enter drills from a stable anchor.
+          setSelectedKey(hasTx(pair.key) ? pair.key : (pair.endKey ?? pair.key));
+          return;
+        }
+      }
       setSelectedKey(key);
     },
-    [period, inDrill, expenses, setSelectedKey],
+    [period, inDrill, expenses, chartBuckets, setSelectedKey],
   );
 
   // --- Derived rows --------------------------------------------------------------
 
   const drillRows = useMemo<BrowseRow[]>(() => {
     if (!inDrill || !drillDayKey) return [];
+    // Month drills cover the whole 2-day pair (drillDayKey = pair start,
+    // drillPairEndKey = pair end or null for an orphan single).
     return expenses
-      .filter(
-        (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
-      )
+      .filter((item) => {
+        const key = dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE));
+        return key === drillDayKey || key === drillPairEndKey;
+      })
       .map((item) => ({
         key: item.id,
         left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
@@ -1148,7 +1196,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           ? item.allocationType === "WEEKLY" ? "Weekly" : "Monthly"
           : undefined,
       }));
-  }, [drillDayKey, expenses, inDrill, pendingIds]);
+  }, [drillDayKey, drillPairEndKey, expenses, inDrill, pendingIds]);
 
   /** Build a civil date label (e.g. "15 Sep") from a YYYY-MM-DD bucket key. */
   const dateLabelFromKey = (key: string): string => {
@@ -1159,13 +1207,25 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return formatDateShort(new Date(isoAtMidnight), APP_TIMEZONE);
   };
 
+  /** Pair-range label for month drill/titles (e.g. "20–21 Sep", or "30 Sep–1 Okt").
+   * Without an endKey (orphan single) it degrades to the plain day label. */
+  const pairMidLabel = (startKey: string, endKey?: string): string => {
+    const startLabel = dateLabelFromKey(startKey);
+    if (!endKey || endKey === startKey) return startLabel;
+    const endLabel = dateLabelFromKey(endKey);
+    const [startDay, startMon] = startLabel.split(" ");
+    const [endDay, endMon] = endLabel.split(" ");
+    if (!startDay || !startMon || !endDay || !endMon) return startLabel;
+    return startMon === endMon ? `${startDay}–${endDay} ${startMon}` : `${startLabel}–${endLabel}`;
+  };
+
   /** Current time reference for relative day labels (recomputed each render). */
   const now = useMemo(() => new Date(), []);
 
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
-    // aggregates from the chart buckets.
+    // aggregates (month chart pairs days, but the history list stays daily).
     if (period === "day") {
       return expenses.map((item) => ({
         key: item.id,
@@ -1179,6 +1239,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           : undefined,
       }));
     }
+    // W/M summary stays per-day even though the month chart pairs days.
     return groupExpensesByDay(expenses, currentPeriodRange(period)).map((day) => ({
       key: day.key,
       left: relativeDayLabel(day.key, now),
@@ -1218,18 +1279,20 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     () =>
       inDrill && drillDayKey
         ? expenses
-            .filter(
-              (item) =>
-                dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
-            )
+            .filter((item) => {
+              const key = dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE));
+              return key === drillDayKey || key === drillPairEndKey;
+            })
             .reduce((sum, item) => sum + item.amount, 0)
         : 0,
-    [inDrill, drillDayKey, expenses],
+    [inDrill, drillDayKey, drillPairEndKey, expenses],
   );
 
   const chartTitle = useMemo(() => {
     if (inDrill && drillDayKey) {
-      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
+      const datePart =
+        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+      return `${relativeDayLabel(drillDayKey, now)} · ${datePart} · ${groupDigits(String(drillDayTotal))}`;
     }
     // Day hourly chart: the header already anchors to "Per jam" — the Today/total
     // subtitle is redundant, so we leave it blank here.
@@ -1238,7 +1301,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
   const effectivePeriodLabel = useMemo(() => {
     if (inDrill && drillDayKey) {
-      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)}`;
+      const datePart =
+        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+      return `${relativeDayLabel(drillDayKey, now)} · ${datePart}`;
     }
     return periodLabel;
   }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);

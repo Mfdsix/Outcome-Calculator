@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { getZonedParts, last7DaysRange } from "@expense-app/shared";
+import { getZonedParts, last30DaysRange, last7DaysRange } from "@expense-app/shared";
 
-import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "./chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "./chart";
 import { APP_TIMEZONE } from "./periods";
 
 describe("groupExpensesByDay", () => {
@@ -263,5 +263,54 @@ describe("dailyBuckets — ignores allocation type (raw sums as-is)", () => {
     // 50k + 700k in full = 750k.
     expect(dayBucket).toBeTruthy();
     expect(dayBucket!.total).toBe(750_000);
+  });
+});
+
+describe("twoDayBuckets — month pairs", () => {
+  // Fixed clock: last-30 window = Aug 26 00:00 → Sep 26 00:00 (31 civil days,
+  // end-anchored) → 15 pairs + the oldest day standing alone.
+  const NOW = new Date("2026-09-25T12:00:00+07:00");
+  const range = last30DaysRange(NOW, APP_TIMEZONE);
+
+  it("renders pair candles anchored at the range end, orphan oldest first", () => {
+    const buckets = twoDayBuckets(range, [], NOW);
+    expect(buckets).toHaveLength(16);
+    expect(buckets[0]!.key).toBe("2026-08-26");
+    expect(buckets[15]!.key).toBe("2026-09-24");
+    expect(buckets.every((b) => b.kind === "day")).toBe(true);
+  });
+
+  it("sums both days raw into the pair, keyed + labeled by the first day", () => {
+    const buckets = twoDayBuckets(
+      range,
+      [
+        { id: "a", amount: 10_000, occurredAt: "2026-09-20T10:00:00+07:00" },
+        { id: "b", amount: 25_000, occurredAt: "2026-09-21T10:00:00+07:00" },
+        { id: "c", amount: 5_000, occurredAt: "2026-09-10T10:00:00+07:00" },
+      ],
+      NOW,
+    );
+    const pair = buckets.find((b) => b.key === "2026-09-20");
+    expect(pair).toMatchObject({ key: "2026-09-20", label: "20", total: 35_000 });
+    // Second day of the pair never stands alone.
+    expect(buckets.find((b) => b.key === "2026-09-21")).toBeUndefined();
+    expect(buckets.find((b) => b.key === "2026-09-10")).toMatchObject({ total: 5_000 });
+  });
+
+  it("marks the pair containing today as current", () => {
+    const buckets = twoDayBuckets(range, [], NOW);
+    // 31-day window, end-anchored: [..., (Sep 22, Sep 23), (Sep 24, Sep 25)].
+    const current = buckets.filter((b) => b.isCurrent);
+    expect(current).toHaveLength(1);
+    expect(current[0]!.key).toBe("2026-09-24");
+  });
+
+  it("sets endKey on real pairs, omits it on the orphan single", () => {
+    const buckets = twoDayBuckets(range, [], NOW);
+    // Oldest day (Aug 26) stands alone: 31 dates → 15 pairs + 1 orphan.
+    expect(buckets).toHaveLength(16);
+    expect(buckets[0]!.key).toBe("2026-08-26");
+    expect("endKey" in buckets[0]!).toBe(false);
+    expect(buckets[buckets.length - 1]).toMatchObject({ key: "2026-09-24", endKey: "2026-09-25" });
   });
 });
