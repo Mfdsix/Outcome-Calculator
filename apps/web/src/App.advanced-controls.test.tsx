@@ -266,3 +266,68 @@ describe("App — AdvancedControls (spec §3)", () => {
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
   });
 });
+
+describe("App — W/M Enter with allocated expenses (spec §Adv-3)", () => {
+  it("Enter drills into a day when a WEEKLY spread leaks outside the visible window", async () => {
+    // WEEKLY occurred yesterday spreads yesterday → +5d (future). The newest
+    // spread day is outside the last-7 chart window; auto-select seeds it and
+    // Enter must still drill (keys are scoped to the visible range).
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    listMock.mockResolvedValue({
+      expenses: [
+        {
+          id: "w1",
+          amount: 70000,
+          allocationType: "WEEKLY",
+          occurredAt: yesterday,
+        },
+      ],
+      total: 70000,
+    });
+
+    const user = await renderUnlocked();
+
+    await user.click(screen.getByTestId("period-week"));
+    await screen.findByTestId("summary-list");
+
+    await user.click(screen.getByTestId("key-enter"));
+
+    // Drill panel opens (browse list), not stuck on summary.
+    expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
+  });
+
+  it("W/M summary never shows days outside the visible window", async () => {
+    // MONTHLY occurred 5 days ago spreads 5d ago → +24d (far future).
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    listMock.mockResolvedValue({
+      expenses: [
+        {
+          id: "m1",
+          amount: 300000,
+          allocationType: "MONTHLY",
+          occurredAt: fiveDaysAgo,
+        },
+      ],
+      total: 300000,
+    });
+
+    const user = await renderUnlocked();
+
+    await user.click(screen.getByTestId("period-month"));
+    await screen.findByTestId("summary-list");
+
+    // Every rendered summary row must be a civil key within the last-30 window.
+    const rows = screen.getAllByTestId(/^summary-row-/);
+    expect(rows.length).toBeGreaterThan(0);
+    const today = new Date();
+    const fmt = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const toKey = fmt(new Date(today.getTime() + 24 * 60 * 60 * 1000));
+    const fromDate = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
+    const fromKey = fmt(fromDate);
+    for (const row of rows) {
+      const key = row.getAttribute("data-testid")!.replace("summary-row-", "");
+      expect(key >= fromKey && key < toKey).toBe(true);
+    }
+  });
+});

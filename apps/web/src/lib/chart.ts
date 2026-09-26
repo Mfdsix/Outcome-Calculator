@@ -1,4 +1,4 @@
-import { addCivilDays, effectiveAllocationForDay, getZonedParts } from "@expense-app/shared";
+import { addCivilDays, getZonedParts } from "@expense-app/shared";
 import type { ExpenseDto, PeriodRange } from "@expense-app/shared";
 
 import { APP_TIMEZONE } from "./periods";
@@ -22,10 +22,10 @@ function civilKey(year: number, month: number, day: number): string {
 
 /**
  * Aggregate expenses into per-calendar-day totals (in APP_TIMEZONE) across
- * the given period range. Uses effectiveAllocationForDay so WEEKLY/MONTHLY
- * expenses are prorated across their allocation window rather than lumped
- * on the occurredAt day.
- * (spec §Adv-3: chart sebar effective per civil day, bukan amount mentah)
+ * the given period range. Totals are raw sums as-is: each expense counts
+ * once, in full, on its occurredAt day. Allocation type/distribution never
+ * affects D/W/M totals. The authoritative period total still comes from
+ * the server; these buckets only drive the chart.
  */
 export function dailyBuckets(
   period: Period,
@@ -51,15 +51,9 @@ export function dailyBuckets(
 
   const totals = new Map<string, number>();
   for (const expense of expenses) {
-    const allocation = effectiveAllocationForDay(
-      expense.amount,
-      expense.allocationType ?? "NONE",
-      expense.occurredAt,
-      APP_TIMEZONE,
-    );
-    for (const [dayKey, amount] of allocation.entries()) {
-      totals.set(dayKey, (totals.get(dayKey) ?? 0) + amount);
-    }
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    totals.set(key, (totals.get(key) ?? 0) + expense.amount);
   }
 
   return dates.map(({ year, month, day }) => {
@@ -76,10 +70,7 @@ export function dailyBuckets(
 
 /**
  * Aggregate expenses into 24 hourly buckets for today (in APP_TIMEZONE).
- * Non-allocated expenses contribute to their actual hour bucket; allocated
- * expenses contribute their effective per-day amount to the first hour
- * bucket of their allocation day (they represent the day's allocation, not
- * a specific hour).
+ * Every expense counts once, in full, at its actual occurrence hour.
  * Labels only render on hours divisible by 3 (00 03 06 09 12 15 18 21).
  */
 export function hourlyBuckets(
@@ -92,18 +83,10 @@ export function hourlyBuckets(
 
   const totals = new Array(24).fill(0);
   for (const expense of expenses) {
-    const expenseType = expense.allocationType ?? "NONE";
-
-    // Only NONE (non-allocated) expenses contribute to the hourly chart —
-    // their actual occurrence hour. WEEKLY/MONTHLY allocations are synthetic
-    // per-day spreads and must NOT appear as spending at "00:00" in the
-    // hourly breakdown (spec §Adv-3: hourly = actual occurrences only).
-    if (!expenseType || expenseType === "NONE") {
-      const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
-      const key = civilKey(parts.year, parts.month, parts.day);
-      if (key === todayKey && parts.hour >= 0 && parts.hour < 24) {
-        totals[parts.hour] += expense.amount;
-      }
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    if (key === todayKey && parts.hour >= 0 && parts.hour < 24) {
+      totals[parts.hour] += expense.amount;
     }
   }
 
@@ -118,26 +101,32 @@ export function hourlyBuckets(
 
 /**
  * Sparse per-day aggregation for the W/M summary list — only days that
- * actually have expenses appear (no zero rows). Uses effectiveAllocationForDay
- * so allocated expenses spread across their allocation window.
+ * actually have expenses appear (no zero rows). Raw sums as-is per occurredAt
+ * day; allocation never affects D/W/M totals.
  * In APP_TIMEZONE; newest-first to match day-summary & drill ordering.
  * Pure; safe to unit-test.
- * (spec §Adv-3: sebar effective per civil day)
+ *
+ * When `range` is given, only days inside the half-open [from, to) window
+ * are returned, so browse selection + Enter-drill keys stay within the
+ * rendered chart buckets.
  */
-export function groupExpensesByDay(expenses: ExpenseDto[]): Array<{ key: string; total: number }> {
+export function groupExpensesByDay(
+  expenses: ExpenseDto[],
+  range?: PeriodRange,
+): Array<{ key: string; total: number }> {
   const totals = new Map<string, number>();
   for (const expense of expenses) {
-    const allocation = effectiveAllocationForDay(
-      expense.amount,
-      expense.allocationType ?? "NONE",
-      expense.occurredAt,
-      APP_TIMEZONE,
-    );
-    for (const [dayKey, amount] of allocation.entries()) {
-      totals.set(dayKey, (totals.get(dayKey) ?? 0) + amount);
-    }
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    totals.set(key, (totals.get(key) ?? 0) + expense.amount);
   }
-  return Array.from(totals.entries())
+  const rows = Array.from(totals.entries())
     .map(([key, total]) => ({ key, total }))
     .sort((a, b) => b.key.localeCompare(a.key));
+  if (!range) return rows;
+  const fromParts = getZonedParts(range.from, APP_TIMEZONE);
+  const toParts = getZonedParts(range.to, APP_TIMEZONE);
+  const fromKey = civilKey(fromParts.year, fromParts.month, fromParts.day);
+  const toKey = civilKey(toParts.year, toParts.month, toParts.day);
+  return rows.filter((row) => row.key >= fromKey && row.key < toKey);
 }

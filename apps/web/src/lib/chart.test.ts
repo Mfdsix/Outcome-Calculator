@@ -54,29 +54,75 @@ describe("groupExpensesByDay", () => {
   });
 });
 
-describe("groupExpensesByDay — allocation-aware", () => {
-  it("WEEKLY 700k created on 17 Sep → 100k each day across 7 days", () => {
+describe("groupExpensesByDay — range filter", () => {
+  // Fixed clock: last-7 window = Sep 19 00:00 → Sep 26 00:00 (exclusive).
+  const NOW = new Date("2026-09-25T12:00:00+07:00");
+
+  it("without range returns every occurredAt day", () => {
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      {
+        id: "w1",
+        amount: 70_000,
+        allocationType: "WEEKLY" as const,
+        occurredAt: "2026-09-20T10:00:00+07:00",
+      },
+      { id: "n1", amount: 5_000, occurredAt: "2026-09-10T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    // Should have 7 entries (17-23 Sep), each 100k.
-    expect(grouped).toHaveLength(7);
-    expect(grouped.every((g) => g.total === 100_000)).toBe(true);
-    // Newest first.
-    expect(grouped[0]).toEqual({ key: "2026-09-23", total: 100_000 });
+    // Raw sums as-is: each expense once, in full, on its own day.
+    expect(grouped).toEqual([
+      { key: "2026-09-20", total: 70_000 },
+      { key: "2026-09-10", total: 5_000 },
+    ]);
   });
 
-  it("WEEKLY 700k created on 17 Sep, 2-day period 18-19 → 200k per day", () => {
+  it("with range keeps only days inside the half-open window", () => {
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      {
+        id: "w1",
+        amount: 70_000,
+        allocationType: "WEEKLY" as const,
+        occurredAt: "2026-09-20T10:00:00+07:00",
+      },
+      { id: "n1", amount: 5_000, occurredAt: "2026-09-10T10:00:00+07:00" },
+    ];
+    const range = last7DaysRange(NOW, APP_TIMEZONE);
+    const grouped = groupExpensesByDay(expenses, range);
+    // Sep 10 is outside Sep 19–26 → only Sep 20 remains.
+    expect(grouped).toEqual([{ key: "2026-09-20", total: 70_000 }]);
+  });
+
+  it("returns [] when no spread day overlaps the window", () => {
+    const expenses = [
+      {
+        id: "w1",
+        amount: 70_000,
+        allocationType: "WEEKLY" as const,
+        occurredAt: "2026-09-01T10:00:00+07:00",
+      },
+    ];
+    const range = last7DaysRange(NOW, APP_TIMEZONE);
+    expect(groupExpensesByDay(expenses, range)).toEqual([]);
+  });
+});
+
+describe("groupExpensesByDay — ignores allocation type (raw sums as-is)", () => {
+  it("WEEKLY 700k created on 17 Sep → single 700k row on 17 Sep", () => {
+    const expenses = [
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    // Days 18 and 19 should each have 100k.
-    const day18 = grouped.find((g) => g.key === "2026-09-18");
-    const day19 = grouped.find((g) => g.key === "2026-09-19");
-    expect(day18).toEqual({ key: "2026-09-18", total: 100_000 });
-    expect(day19).toEqual({ key: "2026-09-19", total: 100_000 });
+    // No spreading: the full amount stays on the occurredAt day.
+    expect(grouped).toEqual([{ key: "2026-09-17", total: 700_000 }]);
+  });
+
+  it("allocated expense on 17 Sep never leaks onto 18-19", () => {
+    const expenses = [
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
+    ];
+    const grouped = groupExpensesByDay(expenses);
+    expect(grouped.find((g) => g.key === "2026-09-18")).toBeUndefined();
+    expect(grouped.find((g) => g.key === "2026-09-19")).toBeUndefined();
   });
 
   it("NONE expense stays on its own day (no spreading)", () => {
@@ -88,46 +134,38 @@ describe("groupExpensesByDay — allocation-aware", () => {
     expect(grouped[0]).toEqual({ key: "2026-09-17", total: 50_000 });
   });
 
-  it("mixed NONE + WEEKLY expenses aggregate correctly", () => {
+  it("mixed NONE + WEEKLY on the same day aggregate raw", () => {
     const expenses = [
       { id: "n1", amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00" },
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    // 17 Sep: 50k (raw) + 100k (weekly allocation) = 150k
-    const day17 = grouped.find((g) => g.key === "2026-09-17");
-    expect(day17).toEqual({ key: "2026-09-17", total: 150_000 });
+    // 17 Sep: 50k + 700k in full = 750k.
+    expect(grouped).toEqual([{ key: "2026-09-17", total: 750_000 }]);
   });
 
-  it("MONTHLY 3M on 17 Sep → 100k/day across 30 days", () => {
+  it("MONTHLY 3M on 17 Sep → single 3M row", () => {
     const expenses = [
-      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    expect(grouped).toHaveLength(30);
-    expect(grouped.every((g) => g.total === 100_000)).toBe(true);
+    expect(grouped).toEqual([{ key: "2026-09-17", total: 3_000_000 }]);
   });
 
-  it("WEEKLY expense partially overlapping the 7-day window (created mid-week)", () => {
+  it("WEEKLY expense created mid-week stays on its own day", () => {
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-19T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-19T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    // WEEKLY window is 19-25 Sep; all 7 days get 100k.
-    expect(grouped).toHaveLength(7);
-    expect(grouped[0]).toEqual({ key: "2026-09-25", total: 100_000 });
-    expect(grouped[6]).toEqual({ key: "2026-09-19", total: 100_000 });
+    expect(grouped).toEqual([{ key: "2026-09-19", total: 700_000 }]);
   });
 
-  it("WEEKLY expense with remainder distributes correctly (701k / 7)", () => {
+  it("WEEKLY 701k stays whole on its own day (no remainder math)", () => {
     const expenses = [
-      { id: "w1", amount: 701_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 701_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const grouped = groupExpensesByDay(expenses);
-    // 701k / 7 = 100142 base, remainder 6 → first 6 days get +1.
-    // Day 1 (Sep 17) gets 100143.
-    const day17 = grouped.find((g) => g.key === "2026-09-17");
-    expect(day17).toEqual({ key: "2026-09-17", total: 100_143 });
+    expect(grouped).toEqual([{ key: "2026-09-17", total: 701_000 }]);
   });
 
   it("allocationType undefined treated as NONE (no spreading)", () => {
@@ -140,7 +178,7 @@ describe("groupExpensesByDay — allocation-aware", () => {
   });
 });
 
-describe("hourlyBuckets — allocation-aware", () => {
+describe("hourlyBuckets — ignores allocation type (raw sums as-is)", () => {
   const now = new Date("2026-09-17T10:30:00+07:00");
 
   it("NONE expense buckets by actual hour", () => {
@@ -153,85 +191,77 @@ describe("hourlyBuckets — allocation-aware", () => {
     expect(buckets[14]!.total).toBe(20000);
   });
 
-  it("WEEKLY expense is excluded from hourly buckets (not at 00:00)", () => {
+  it("WEEKLY expense counts in full at its actual hour", () => {
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = hourlyBuckets(expenses, now);
-    // WEEKLY prorated allocation must NOT appear in hourly chart at all.
-    expect(buckets[0]!.total).toBe(0);
-    expect(buckets[10]!.total).toBe(0);
-    expect(buckets.every((b) => b.total === 0)).toBe(true);
+    expect(buckets[10]!.total).toBe(700_000);
+    expect(buckets.reduce((sum, b) => sum + b.total, 0)).toBe(700_000);
   });
 
-  it("MONTHLY expense is excluded from hourly buckets", () => {
+  it("MONTHLY expense counts in full at its actual hour", () => {
     const expenses = [
-      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = hourlyBuckets(expenses, now);
-    expect(buckets.every((b) => b.total === 0)).toBe(true);
+    expect(buckets[10]!.total).toBe(3_000_000);
   });
 
-  it("mixed NONE + WEEKLY: only NONE contributes to its actual hour", () => {
+  it("mixed NONE + WEEKLY: both count at their actual hours", () => {
     const expenses = [
       { id: "n1", amount: 30_000, occurredAt: "2026-09-17T14:00:00+07:00" },
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = hourlyBuckets(expenses, now);
-    // The WEEKLY 100k allocation is excluded; only the 30k NONE at 14:00 appears.
     expect(buckets[14]!.total).toBe(30_000);
-    expect(buckets[0]!.total).toBe(0);
-    expect(buckets[10]!.total).toBe(0);
-    // Sum of all hourly buckets = 30k (no allocation leakage).
-    expect(buckets.reduce((sum, b) => sum + b.total, 0)).toBe(30_000);
+    expect(buckets[10]!.total).toBe(700_000);
+    expect(buckets.reduce((sum, b) => sum + b.total, 0)).toBe(730_000);
   });
 
-  it("WEEKLY expense on a past day still excluded from hourly buckets", () => {
+  it("expense on a past day does not appear in another day's hourly chart", () => {
     // WEEKLY created Sep 15; Sep 17 hourly chart is for Sep 17 only.
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-15T14:32:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-15T14:32:00+07:00" },
     ];
     const buckets = hourlyBuckets(expenses, now);
     expect(buckets.every((b) => b.total === 0)).toBe(true);
   });
 });
 
-describe("dailyBuckets — allocation-aware", () => {
-  it("WEEKLY 700k on 17 Sep spans 7 days in week view", () => {
+describe("dailyBuckets — ignores allocation type (raw sums as-is)", () => {
+  it("WEEKLY 700k on 17 Sep lands in full on 17 Sep only", () => {
     const range = last7DaysRange(new Date("2026-09-18T00:00:00+07:00"), APP_TIMEZONE);
     const expenses = [
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = dailyBuckets("week", range, expenses, new Date("2026-09-18T00:00:00+07:00"));
-    // Each day with allocation should have 100k.
     const nonZero = buckets.filter((b) => b.total > 0);
-    expect(nonZero.length).toBeGreaterThanOrEqual(2); // 17 Sep may not be in range
-    expect(nonZero.every((b) => b.total === 100_000)).toBe(true);
+    expect(nonZero).toHaveLength(1);
+    expect(nonZero[0]).toMatchObject({ key: "2026-09-17", total: 700_000 });
   });
 
-  it("MONTHLY expense spans 30 days, clipped to the month range", () => {
+  it("MONTHLY expense lands in full on its own day", () => {
     const range = { from: new Date("2026-09-01T00:00:00+07:00"), to: new Date("2026-10-01T00:00:00+07:00") };
     const expenses = [
-      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY", occurredAt: "2026-09-15T10:00:00+07:00" },
+      { id: "m1", amount: 3_000_000, allocationType: "MONTHLY" as const, occurredAt: "2026-09-15T10:00:00+07:00" },
     ];
     const buckets = dailyBuckets("month", range, expenses, new Date("2026-09-18T00:00:00+07:00"));
-    // MONTHLY window: 15 Sep – 14 Oct (30 days). Range: 1-30 Sep.
-    // Overlap = 15 Sep – 30 Sep = 16 days, each 100k.
     const nonZero = buckets.filter((b) => b.total > 0);
-    expect(nonZero.length).toBe(16);
-    expect(nonZero.every((b) => b.total === 100_000)).toBe(true);
+    expect(nonZero).toHaveLength(1);
+    expect(nonZero[0]).toMatchObject({ key: "2026-09-15", total: 3_000_000 });
   });
 
-  it("mixed NONE + WEEKLY in dailyBuckets shows combined totals", () => {
+  it("mixed NONE + WEEKLY on the same day combine raw", () => {
     const range = { from: new Date("2026-09-17T00:00:00+07:00"), to: new Date("2026-09-18T00:00:00+07:00") };
     const expenses = [
       { id: "n1", amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00" },
-      { id: "w1", amount: 700_000, allocationType: "WEEKLY", occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "w1", amount: 700_000, allocationType: "WEEKLY" as const, occurredAt: "2026-09-17T10:00:00+07:00" },
     ];
     const buckets = dailyBuckets("day", range, expenses, new Date("2026-09-17T10:30:00+07:00"));
     const dayBucket = buckets.find((b) => b.key === "2026-09-17");
-    // 50k (raw) + 100k (weekly share) = 150k
+    // 50k + 700k in full = 750k.
     expect(dayBucket).toBeTruthy();
-    expect(dayBucket!.total).toBe(150_000);
+    expect(dayBucket!.total).toBe(750_000);
   });
 });

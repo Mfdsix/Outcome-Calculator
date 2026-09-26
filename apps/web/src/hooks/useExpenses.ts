@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { allocationAwareTotal, expenseEffectiveAmount } from "@expense-app/shared";
 import type { ExpenseDto } from "@expense-app/shared";
 
 import { expensesRepository } from "../lib/repository";
@@ -156,9 +155,17 @@ export function useExpenses(): UseExpensesResult {
               const merged = [...extras, ...cache.expenses].sort(
                 (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
               );
-              // Compute allocation-aware total for the current W/M period.
+              // Raw total as-is: sum amounts whose occurredAt falls in [from, to).
               const range = currentPeriodRange(period);
-              const computedTotal = allocationAwareTotal(merged, range, APP_TIMEZONE);
+              const fromMs = range.from.getTime();
+              const toMs = range.to.getTime();
+              const computedTotal = merged.reduce(
+                (sum, item) => {
+                  const t = new Date(item.occurredAt).getTime();
+                  return t >= fromMs && t < toMs ? sum + item.amount : sum;
+                },
+                0,
+              );
               setTotal(computedTotal);
               return merged;
             });
@@ -242,14 +249,11 @@ export function useExpenses(): UseExpensesResult {
     setExpenses((current) => {
       const previous = current.find((item) => item.id === expense.id);
       if (previous) {
-        const activeRange = currentPeriodRange(period);
-        const oldContrib = expenseEffectiveAmount(previous, activeRange, APP_TIMEZONE);
-        const newContrib = expenseEffectiveAmount(expense, activeRange, APP_TIMEZONE);
-        setTotal((t) => t - oldContrib + newContrib);
+        setTotal((t) => t - previous.amount + expense.amount);
       }
       return current.map((item) => (item.id === expense.id ? expense : item));
     });
-  }, [period]);
+  }, []);
 
   const applyOptimisticDelete = useCallback((id: string) => {
     let hadListEntry = false;
@@ -257,14 +261,12 @@ export function useExpenses(): UseExpensesResult {
       const previous = current.find((item) => item.id === id);
       if (previous) {
         hadListEntry = true;
-        const activeRange = currentPeriodRange(period);
-        const contrib = expenseEffectiveAmount(previous, activeRange, APP_TIMEZONE);
-        setTotal((t) => t - contrib);
+        setTotal((t) => t - previous.amount);
       }
       return current.filter((item) => item.id !== id);
     });
     return { hadListEntry };
-  }, [period]);
+  }, []);
 
   /** Swap a local optimistic row id for the outbox temp id. Functional so it
    * never suffers the stale-closure problem of capture-at-call-time lists. */

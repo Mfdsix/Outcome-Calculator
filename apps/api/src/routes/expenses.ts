@@ -1,5 +1,5 @@
 import type { ExpenseListResponse, ExpenseDto, CreateExpensePayload, UpdateExpensePayload } from "@expense-app/shared";
-import { allocationAwareTotal, createExpenseSchema, updateExpenseSchema } from "@expense-app/shared";
+import { createExpenseSchema, updateExpenseSchema } from "@expense-app/shared";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyPluginAsync } from "fastify";
 
@@ -65,13 +65,12 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "from must be before to." });
     }
 
-    // Expanded fetch window: pull up to 30 days before `from` so allocated
-    // expenses whose window overlaps [from, to) are included in totals and
-    // chart buckets (spec §Adv-4).
-    const fetchFrom = new Date(from.getTime() - 30 * 86_400_000);
-    const rangeWhere = { userId, occurredAt: { gte: fetchFrom, lt: to } };
+    // D/W/M totals are raw sums as-is: each expense counts once, in full,
+    // on its occurredAt day. Allocation type/distribution is stored on the
+    // row but never affects totals.
+    const rangeWhere = { userId, occurredAt: { gte: from, lt: to } };
 
-    const [rows, aggregate] = await prisma.$transaction([
+    const [rows, sum] = await prisma.$transaction([
       prisma.expense.findMany({
         where: rangeWhere,
         orderBy: { occurredAt: "desc" },
@@ -82,30 +81,9 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       }),
     ]);
 
-    const expenses: ExpenseDto[] = rows.map((row) => toExpenseDto(row, appTimezone));
-
-    // Allocation-aware total for the requested [from, to) range — computed
-    // from the full expanded set so WEEKLY/MONTHLY expenses whose window
-    // overlaps [from, to) contribute their prorated share.
-    const requestedPeriod = { from, to };
-    const allocationTotal = allocationAwareTotal(
-      expenses,
-      requestedPeriod,
-      appTimezone,
-    );
-
-    // Separate history transactions from allocation sources: the returned
-    // list contains only expenses whose occurredAt falls within [from, to).
-    // Expenses outside the range but inside the expanded window exist solely
-    // to feed the allocation-aware total above and are not shown in history.
-    const inRangeExpenses = expenses.filter((e) => {
-      const t = new Date(e.occurredAt).getTime();
-      return t >= from.getTime() && t < to.getTime();
-    });
-
     const response: ExpenseListResponse = {
-      expenses: inRangeExpenses,
-      total: allocationTotal,
+      expenses: rows.map((row) => toExpenseDto(row, appTimezone)),
+      total: sum._sum.amount === null ? 0 : Number(sum._sum.amount),
     };
     return reply.send(response);
   });

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   TOKEN_REFRESH_MIN_INTERVAL_MS,
-  allocationAwareTotal,
-  expenseEffectiveAmount,
   getZonedParts,
   formatDateShort,
   formatTimeShort,
@@ -322,11 +320,15 @@ function AppBody({ logout }: { logout: () => void }) {
 
   /** Today's civil-day total (Jakarta) from the live list — optimistic and
    * offline-cache friendly; feeds the insight engine with zero fetches.
-   * Uses allocationAwareTotal so WEEKLY/MONTHLY expenses are prorated to
-   * today's share (spec §Adv-1/§Adv-4). */
+   * Raw sum as-is: allocation never affects totals. */
   const todayTotal = useMemo(() => {
     const { from, to } = currentPeriodRange("day");
-    return allocationAwareTotal(expenses, { from, to }, APP_TIMEZONE);
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    return expenses.reduce((sum, item) => {
+      const at = new Date(item.occurredAt).getTime();
+      return at >= fromMs && at < toMs ? sum + item.amount : sum;
+    }, 0);
   }, [expenses]);
   const { insights } = useInsights(budget.active, todayTotal);
   const [flash, setFlash] = useState(false);
@@ -537,35 +539,24 @@ function AppBody({ logout }: { logout: () => void }) {
     });
   }, []);
 
-  /** Patch the snapshot for an offline update/delete of a real row. */
+  /** Patch the snapshot for an offline update/delete of a real row.
+   * Totals stay raw sums as-is. */
   const patchCacheRow = useCallback(
     async (id: string, next: { amount: number; allocationType?: AllocationType } | null) => {
       await mutateTodayCache((cache) => {
         const previous = cache.expenses.find((item) => item.id === id);
         if (next === null) {
-          const contrib =
-            previous && cache.from && cache.to
-              ? expenseEffectiveAmount(previous, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
-              : previous?.amount ?? 0;
           return {
             ...cache,
             expenses: cache.expenses.filter((item) => item.id !== id),
-            total: cache.total - contrib,
+            total: cache.total - (previous?.amount ?? 0),
           };
         }
-        const oldContrib =
-          previous && cache.from && cache.to
-            ? expenseEffectiveAmount(previous, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
-            : previous?.amount ?? 0;
         const updatedExpense = {
           ...previous,
           amount: next.amount,
           allocationType: next.allocationType ?? previous?.allocationType,
         } as ExpenseDto;
-        const newContrib =
-          cache.from && cache.to
-            ? expenseEffectiveAmount(updatedExpense, { from: new Date(cache.from), to: new Date(cache.to) }, APP_TIMEZONE)
-            : next.amount;
         return {
           ...cache,
           expenses: cache.expenses.map((item) =>
@@ -573,7 +564,7 @@ function AppBody({ logout }: { logout: () => void }) {
               ? updatedExpense
               : item,
           ),
-          total: cache.total - oldContrib + newContrib,
+          total: cache.total - (previous?.amount ?? 0) + next.amount,
         };
       });
     },
@@ -836,7 +827,10 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
    * keeps selection + up/down + disabled state aligned to the rows actually
    * shown, so the highlight never vanishes on a zero-data day.
    */
-  const navDayKeys = useMemo(() => groupExpensesByDay(expenses).map((d) => d.key), [expenses]);
+  const navDayKeys = useMemo(
+    () => groupExpensesByDay(expenses, currentPeriodRange(period)).map((d) => d.key),
+    [expenses, period],
+  );
 
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
@@ -1185,7 +1179,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           : undefined,
       }));
     }
-    return groupExpensesByDay(expenses).map((day) => ({
+    return groupExpensesByDay(expenses, currentPeriodRange(period)).map((day) => ({
       key: day.key,
       left: relativeDayLabel(day.key, now),
       mid: dateLabelFromKey(day.key),

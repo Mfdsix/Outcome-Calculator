@@ -139,9 +139,8 @@ describe("GET /api/expenses", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    // Expense from 16 Sep is outside [from, to) — excluded from the response
-    // list even though it was fetched (expanded window for allocation).
-    // The allocation-aware total still reflects only Sep 17.
+    // Expense from 16 Sep is outside [from, to) — excluded from both the
+    // list and the raw total (exact range, no expanded fetch window).
     expect(body.expenses).toHaveLength(2);
     expect(body.total).toBe(60000);
     // Newest first.
@@ -198,7 +197,7 @@ describe("GET /api/expenses", () => {
     expect(body.total).toBe(0);
   });
 
-  it("allocation-aware total: WEEKLY 700k on day 1 → 100k in today's range", async () => {
+  it("total ignores allocation type: WEEKLY 700k counts in full on its own day", async () => {
     await seedRows(userId, [
       { amount: 700_000, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "WEEKLY" },
     ]);
@@ -210,12 +209,12 @@ describe("GET /api/expenses", () => {
     });
 
     const body = response.json();
-    expect(body.total).toBe(100_000); // 700k / 7 days
+    expect(body.total).toBe(700_000); // raw sum as-is, no prorating
   });
 
-   it("allocation-aware total: WEEKLY expense in expanded fetch window still visible", async () => {
-     // Expense created on 15 Sep, WEEKLY window = 15-21 Sep. Period = 17-19 Sep.
-     // 2 days overlap (17, 18) → 200k
+   it("total ignores allocation type: expense outside the range contributes nothing", async () => {
+     // Expense created on 15 Sep no longer leaks into 17-19 Sep via any
+     // allocation window: exact range, raw sums only.
      await seedRows(userId, [
        { amount: 700_000, occurredAt: new Date("2026-09-15T10:00:00+07:00"), allocationType: "WEEKLY" },
      ]);
@@ -226,11 +225,12 @@ describe("GET /api/expenses", () => {
        headers: authed,
      });
 
-     // 2 days overlap (17, 18) → 200k
-     expect(response.json().total).toBe(200_000);
+     const body = response.json();
+     expect(body.expenses).toEqual([]);
+     expect(body.total).toBe(0);
    });
 
-  it("allocation-aware total: NON-allocated expense returns full amount", async () => {
+  it("total ignores allocation type: NON-allocated expense returns full amount", async () => {
     await seedRows(userId, [
       { amount: 50_000, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "NONE" },
     ]);
@@ -244,7 +244,7 @@ describe("GET /api/expenses", () => {
     expect(response.json().total).toBe(50_000);
   });
 
-  it("allocation-aware total with remainder: 1.000.001 / 7 → day 1 gets 142858", async () => {
+  it("total ignores allocation type: 1.000.001 WEEKLY counts whole, no remainder math", async () => {
     await seedRows(userId, [
       { amount: 1_000_001, occurredAt: new Date("2026-09-17T10:00:00+07:00"), allocationType: "WEEKLY" },
     ]);
@@ -255,7 +255,7 @@ describe("GET /api/expenses", () => {
       headers: authed,
     });
 
-    expect(response.json().total).toBe(142_858);
+    expect(response.json().total).toBe(1_000_001);
   });
 });
 
