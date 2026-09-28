@@ -6,9 +6,18 @@ import type {
   BudgetStatus,
   BudgetType,
   CreateBudgetPayload,
+  Insight,
   SuggestedCopyDates,
 } from "@expense-app/shared";
-import { civilToday, digitsToAmount, formatIDR, normalizeDigits, suggestCopyDates } from "@expense-app/shared";
+import {
+  budgetBalance,
+  civilToday,
+  digitsToAmount,
+  formatIDR,
+  formatIDRAbbreviated,
+  normalizeDigits,
+  suggestCopyDates,
+} from "@expense-app/shared";
 
 import { BudgetProgress, periodLabelOf } from "./BudgetProgress";
 import { APP_TIMEZONE } from "../lib/periods";
@@ -20,6 +29,8 @@ export interface BudgetScreenProps {
   onBack: () => void;
   onCreate: (payload: CreateBudgetPayload) => Promise<boolean>;
   onRemove: () => Promise<boolean>;
+  /** Insight rows (from useInsights) — rendered as a list under the active card. */
+  insights: Insight[];
 }
 
 interface PrefillState {
@@ -48,10 +59,13 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, insights }: BudgetScreenProps) {
+  /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
+  const todayKey = todayISO;
 
   const [prefill, setPrefill] = useState<PrefillState | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<BudgetType>("daily");
   const [amountText, setAmountText] = useState("");
   const [startDate, setStartDate] = useState(todayISO);
@@ -59,6 +73,9 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  /** Show the form when: empty state (forced open), prefill active, or toggled. */
+  const showFormState = showForm || prefill !== null || active === null;
 
   /** Apply a prefill: identical type+amount, smart-shifted editable dates. */
   useEffect(() => {
@@ -81,6 +98,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
       suggested: suggestCopyDates(item, APP_TIMEZONE),
       source,
     });
+    setShowForm(true);
   };
 
   const amount = digitsToAmount(amountText);
@@ -99,11 +117,30 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
     if (ok) {
       setPrefill(null);
       setAmountText("");
+      setShowForm(false);
     }
   };
 
-  // Gray "Selesai" card + "Buat yang baru" CTA once the period is fully past.
-  const finished = active !== null && active.endDate < todayISO;
+   /** Pace balance (plan §3: Budget aktif fokus) — derived from active + today. */
+   const balance = useMemo(
+     () =>
+       active !== null
+         ? budgetBalance(
+             {
+               type: active.type,
+               amount: active.amount,
+               startDate: active.startDate,
+               endDate: active.endDate,
+               spent: active.spent,
+             },
+             todayKey,
+             APP_TIMEZONE,
+           )
+         : null,
+     [active, todayKey],
+   );
+
+   const finished = active !== null && active.endDate < todayKey;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="budget-screen">
@@ -150,6 +187,42 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
               finished={finished}
             />
+
+            {/* Pace summary — minus/surplus vs jalur wajar (plan §3) */}
+            {!finished && balance !== null && (
+              <BudgetBalanceSummary balance={balance} />
+            )}
+
+            {/* Insight list (rendered below active card) */}
+            {insights.length > 0 && (
+              <ul
+                data-testid="budget-insight-list"
+                className="space-y-1.5"
+              >
+                {insights.map((insight) => (
+                  <li
+                    key={insight.id}
+                    data-testid={`budget-insight-${insight.id}`}
+                    className="flex items-start gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-3 py-2"
+                  >
+                    <span
+                      className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
+                        insight.tone === "over"
+                          ? "bg-red-500"
+                          : insight.tone === "warn"
+                            ? "bg-amber-500"
+                            : insight.tone === "info"
+                              ? "bg-sky-400"
+                              : "bg-emerald-500"
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span className="text-xs text-neutral-300">{insight.full}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             <div className="flex gap-2">
               <button
                 type="button"
@@ -216,20 +289,37 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           </section>
         )}
 
-        {/* Create / replace form */}
-        <section>
-          <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
-            {prefill ? "Ganti budget — review & simpan" : "Budget baru"}
-          </h2>
-          <form
-            ref={formRef}
-            data-testid="budget-form"
-            className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
+        {/* Create / replace form — collapsed to a "Tambah" button when an active
+            (non-prefill) budget exists; expanded on toggle, prefill, or empty. */}
+        {active !== null && !showFormState ? (
+          <div>
+            <button
+              type="button"
+              data-testid="budget-form-toggle"
+              onClick={() => setShowForm(true)}
+              className="h-11 w-full rounded-lg border border-neutral-700 text-sm font-semibold text-neutral-300 active:bg-neutral-800"
+            >
+              + Tambah
+            </button>
+          </div>
+        ) : (
+          <section data-testid="budget-form-section">
+            <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
+              {prefill
+                ? "Ganti budget — review & simpan"
+                : active === null
+                  ? "Budget baru"
+                  : "Budget baru"}
+            </h2>
+            <form
+              ref={formRef}
+              data-testid="budget-form"
+              className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
             {prefill && (
               <p className="rounded-lg bg-neutral-800/60 px-2.5 py-1.5 text-xs text-neutral-400" data-testid="budget-prefill-note">
                 Dari {prefill.source === "active" ? "budget aktif" : "riwayat"}: tipe & nominal disalin,
@@ -313,8 +403,9 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
             >
               {busy ? "Menyimpan…" : "Simpan budget"}
             </button>
-          </form>
-        </section>
+            </form>
+          </section>
+        )}
       </div>
 
       {/* Soft-delete confirm: history keeps the row (plan §1 — no hard delete) */}
@@ -356,6 +447,52 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pace balance summary: minus (boros) / surplus (hemat) vs jalur wajar.
+ *  Shows a recovery nudge ("Hemat RpX/hari selama N hari") when overdrawn and
+ *  there are still days left. Hidden on finished periods. */
+function BudgetBalanceSummary({ balance }: { balance: NonNullable<ReturnType<typeof budgetBalance>> }) {
+  const absDev = Math.abs(balance.dev);
+  const over = balance.dev > 0;
+
+  // Below ±10% threshold → "di jalur" (no headline).
+  if (Math.abs(balance.dev) <= balance.threshold) {
+    return (
+      <div
+        data-testid="budget-balance-track"
+        className="text-center text-xs text-neutral-400"
+      >
+        Di jalur wajar ({balance.dayIndex}/{balance.totalDays} hari).
+      </div>
+    );
+  }
+
+  const recovery =
+    over && balance.daysLeft > 0
+      ? Math.ceil(balance.dev / balance.daysLeft / 1000) * 1000
+      : 0;
+
+  return (
+    <div data-testid="budget-balance-summary" className="space-y-1.5">
+      <div className="flex items-center justify-center gap-2 text-center text-xs">
+        <span
+          className={`font-semibold ${
+            over ? "text-red-300" : "text-emerald-300"
+          }`}
+          data-testid="budget-balance-dev">
+          {over ? `−${formatIDR(absDev)} dari jalur` : `+${formatIDR(absDev)} surplus`}
+        </span>
+      </div>
+      {over && balance.daysLeft > 0 && recovery > 0 && (
+        <div
+          data-testid="budget-recover"
+          className="text-center text-xs text-amber-300">
+          {`Hemat ${formatIDRAbbreviated(recovery)}/hari selama ${balance.daysLeft} hari agar balance.`}
         </div>
       )}
     </div>

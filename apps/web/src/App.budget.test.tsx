@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BudgetActiveResponse, BudgetHistoryItem } from "@expense-app/shared";
 import { suggestCopyDates } from "@expense-app/shared";
@@ -424,5 +424,114 @@ describe("App — create + remove budget", () => {
 
     expect(removeBudgetMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("budget-card")).toBeInTheDocument();
+  });
+});
+
+describe("App — budget screen: form toggle + balance summary (plan §3)", () => {
+  // Freeze today so budgetBalance pace/recovery assertions are stable.
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-09-28T12:00:00+07:00"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("form is collapsed (Tambah toggle) when an active budget exists; opens on toggle", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-card");
+
+    // Form is collapsed — only the toggle is visible.
+    expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("budget-form-toggle"));
+    expect(await screen.findByTestId("budget-form")).toBeInTheDocument();
+  });
+
+  it("active budget boros → shows minus-from-jalur + recovery nudge", async () => {
+    // Full budget Sep 28–30 (3 days, 1M cap). Today = day 1 → fair 333.333.
+    // Spent 800.000 → dev 467.000 > threshold (100.000) → boros + recovery.
+    getActiveMock.mockResolvedValue(
+      activeBudget({
+        type: "full",
+        amount: 1_000_000,
+        startDate: "2026-09-28",
+        endDate: "2026-09-30",
+        spent: 800_000,
+        remaining: 200_000,
+        progressPct: 80,
+        status: "over",
+      }),
+    );
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+
+    expect(await screen.findByTestId("budget-balance-summary")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-balance-dev")).toHaveTextContent("−Rp466.667 dari jalur");
+    expect(screen.getByTestId("budget-recover")).toHaveTextContent("Hemat Rp234.000/hari selama 2 hari agar balance.");
+  });
+
+  it("on-track budget → shows 'Di jalur' line, no summary/recover", async () => {
+    // Full budget Sep 1–30 (30 days, 1M cap). Today = day 28 → fair ≈ 933.333.
+    // Spent 930.000 → dev ≈ 3.333 → within ±100.000 threshold → on track.
+    getActiveMock.mockResolvedValue(
+      activeBudget({
+        type: "full",
+        amount: 1_000_000,
+        startDate: "2026-09-01",
+        endDate: "2026-09-30",
+        spent: 930_000,
+        remaining: 70_000,
+        progressPct: 93,
+        status: "ok",
+      }),
+    );
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+
+    expect(await screen.findByTestId("budget-balance-track")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-balance-track")).toHaveTextContent("Di jalur");
+    expect(screen.queryByTestId("budget-balance-summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-recover")).not.toBeInTheDocument();
+  });
+
+  it("Pakai lagi from active opens form with prefill (not collapsed)", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-card");
+
+    // Form is collapsed initially.
+    expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
+
+    // Ganti pada card → prefill → form muncul.
+    await user.click(screen.getByTestId("budget-active-ganti"));
+    expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-form")).toBeInTheDocument();
+  });
+
+  it("submit from collapsed form via toggle collapses again on success", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-card");
+
+    await user.click(screen.getByTestId("budget-form-toggle"));
+    await screen.findByTestId("budget-form");
+
+    await user.click(screen.getByTestId("budget-type-daily"));
+    await user.type(screen.getByTestId("budget-amount"), "150000");
+    await user.click(screen.getByTestId("budget-submit"));
+
+    // After successful create, form collapses.
+    await screen.findByTestId("budget-form-toggle");
+    expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
   });
 });
