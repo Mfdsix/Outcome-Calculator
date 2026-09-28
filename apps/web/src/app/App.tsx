@@ -1417,7 +1417,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           onBack={closeBudget}
           onCreate={handleBudgetCreate}
           onRemove={handleBudgetRemove}
-          insights={insights}
+          series={budget.series}
+          seriesLoading={budget.seriesLoading}
         />
       ) : isInsight ? (
         <InsightScreen

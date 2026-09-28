@@ -274,6 +274,50 @@ describe("GET /api/budgets/history", () => {
   });
 });
 
+describe("GET /api/budgets/active/series", () => {
+  it("returns empty days when there is no active budget", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/budgets/active/series", headers: authed });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ days: [] });
+  });
+
+  it("groups spend by Jakarta civil day within the budget range", async () => {
+    await createBudget({ type: "daily", amount: 100_000, startDate: "2026-09-25", endDate: "2026-09-28" });
+    await seedRows(userId, [
+      { amount: 30_000, occurredAt: new Date(`2026-09-25T10:00:00${TZ_OFFSET}`) },
+      { amount: 20_000, occurredAt: new Date(`2026-09-25T20:00:00${TZ_OFFSET}`) }, // same civil day → one point
+      { amount: 190_019, occurredAt: new Date(`2026-09-27T10:00:00${TZ_OFFSET}`) },
+      { amount: 900_000, occurredAt: new Date(`2026-09-20T10:00:00${TZ_OFFSET}`) }, // outside range → excluded
+    ]);
+
+    const response = await app.inject({ method: "GET", url: "/api/budgets/active/series", headers: authed });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      days: [
+        { date: "2026-09-25", total: 50_000 },
+        { date: "2026-09-27", total: 190_019 },
+      ],
+    });
+  });
+
+  it("attributes a late-night UTC time to the correct Jakarta civil day", async () => {
+    // 2026-09-26T17:30:00Z = 2026-09-27 00:30 WIB → must land on the 27th.
+    await createBudget({ type: "full", amount: 1_000_000, startDate: "2026-09-26", endDate: "2026-09-28" });
+    await seedRows(userId, [{ amount: 15_000, occurredAt: new Date("2026-09-26T17:30:00Z") }]);
+
+    const response = await app.inject({ method: "GET", url: "/api/budgets/active/series", headers: authed });
+    expect(response.json()).toEqual({ days: [{ date: "2026-09-27", total: 15_000 }] });
+  });
+
+  it("scopes by user: B never sees A's series", async () => {
+    await createBudget({ type: "full", amount: 1_000_000, startDate: "2026-09-25", endDate: "2026-09-28" }, authed);
+    await seedRows(userId, [{ amount: 10_000, occurredAt: new Date(`2026-09-25T10:00:00${TZ_OFFSET}`) }]);
+
+    const forB = (await app.inject({ method: "GET", url: "/api/budgets/active/series", headers: authedB })).json();
+    expect(forB).toEqual({ days: [] });
+  });
+});
+
 describe("DELETE /api/budgets/active", () => {
   it("returns 404 when there is no active budget", async () => {
     const response = await app.inject({ method: "DELETE", url: "/api/budgets/active", headers: authed });

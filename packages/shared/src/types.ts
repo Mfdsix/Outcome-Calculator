@@ -30,6 +30,19 @@ export interface UpdateExpensePayload {
   allocationType?: AllocationType;
 }
 
+/** One day in a budget series response — sparse (server returns only days with spend). */
+export interface BudgetDayPoint {
+  /** Civil date YYYY-MM-DD (Asia/Jakarta). */
+  date: string;
+  /** Sum of expense amounts (IDR) on that civil day within the budget range. */
+  total: number;
+}
+
+/** GET /api/budgets/active/series response — { days: [...] } (empty when no active budget). */
+export interface BudgetSeriesResponse {
+  days: BudgetDayPoint[];
+}
+
 export interface LoginResponse {
   token: string;
   expiresInMs: number;

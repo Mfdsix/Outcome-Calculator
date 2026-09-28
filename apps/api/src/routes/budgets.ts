@@ -11,6 +11,8 @@ import type {
   BudgetHistoryItem,
   BudgetStatus,
   BudgetType,
+  BudgetDayPoint,
+  BudgetSeriesResponse,
 } from "@expense-app/shared";
 import type { Budget, PrismaClient } from "@prisma/client";
 import type { FastifyPluginAsync } from "fastify";
@@ -154,7 +156,42 @@ export const budgetRoutes: FastifyPluginAsync<BudgetRoutesOptions> = async (
     return reply.send({ history });
   });
 
-  app.delete("/api/budgets/active", async (request, reply) => {
+   app.get("/api/budgets/active/series", async (request, reply) => {
+     const userId = request.userId as string;
+     const budget = await prisma.budget.findFirst({
+       where: { userId, isActive: true },
+       orderBy: { createdAt: "desc" },
+     });
+
+     if (!budget) {
+       return reply.send({ days: [] } satisfies BudgetSeriesResponse);
+     }
+
+     // Group expenses by civil day (Asia/Jakarta) inside the budget range.
+     // Server returns only days that have spending; the client zero-fills.
+     const bounds = rangeBounds(budget, appTimezone);
+     const rows = await prisma.$queryRaw<
+       Array<{ date: string; total: string }>
+     >`
+       SELECT
+         to_char("occurred_at" AT TIME ZONE ${appTimezone as string}, 'YYYY-MM-DD') AS date,
+         SUM("amount") AS total
+       FROM "expenses"
+       WHERE "user_id" = ${userId}::uuid
+         AND "occurred_at" >= ${bounds.from}::timestamptz
+         AND "occurred_at" < ${bounds.to}::timestamptz
+       GROUP BY 1
+       ORDER BY 1
+     `;
+
+     const days: BudgetDayPoint[] = rows.map((row) => ({
+       date: row.date,
+       total: Number(row.total),
+     }));
+     return reply.send({ days } satisfies BudgetSeriesResponse);
+   });
+
+   app.delete("/api/budgets/active", async (request, reply) => {
     const userId = request.userId as string;
     // Scoped update: nothing matched → the caller has no active budget → 404.
     const updated = await prisma.budget.updateMany({
