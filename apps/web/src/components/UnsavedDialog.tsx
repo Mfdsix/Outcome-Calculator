@@ -1,19 +1,23 @@
 import { useEffect, useRef } from "react";
 
 export interface UnsavedDialogProps {
+  /** Tombol "Simpan" — proses penyimpanan biasa (Enter/confirmUpdate). */
   onSave: () => void;
-  onCancel: () => void;
+  /** Tombol "Kembali" — buang perubahan & kembali ke history. */
+  onDiscard: () => void;
+  /** Backdrop klik / Escape — tutup dialog, tetap di edit mode. */
+  onDismiss: () => void;
 }
 
 /** "Data belum tersimpan." confirmation (spec plan §4e): appear only when leaving
  * edit with unsaved changes. Save routes through the normal Enter/confirmUpdate
- * path (UpdateDialog reuse); Cancel reverts the edit and restores history.
- * Escape + backdrop + Cancel both just close this dialog (stay in edit). */
-export function UnsavedDialog({ onSave, onCancel }: UnsavedDialogProps) {
-  const cancelRef = useRef<HTMLButtonElement>(null);
+ * path (UpdateDialog reuse); Discard reverts the edit and restores history;
+ * backdrop/Escape only dismiss the dialog (stay in edit). */
+export function UnsavedDialog({ onSave, onDiscard, onDismiss }: UnsavedDialogProps) {
+  const discardRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    cancelRef.current?.focus();
+    discardRef.current?.focus();
   }, []);
 
   return (
@@ -23,7 +27,7 @@ export function UnsavedDialog({ onSave, onCancel }: UnsavedDialogProps) {
       aria-modal="true"
       aria-label="Unsaved changes"
       data-testid="unsaved-dialog"
-      onClick={onCancel}
+      onClick={onDismiss}
     >
       <div
         className="w-full max-w-xs rounded-xl border border-neutral-800 bg-neutral-900 p-5 shadow-xl"
@@ -37,9 +41,9 @@ export function UnsavedDialog({ onSave, onCancel }: UnsavedDialogProps) {
         </p>
         <div className="flex gap-2">
           <button
-            ref={cancelRef}
+            ref={discardRef}
             type="button"
-            onClick={onCancel}
+            onClick={onDiscard}
             data-testid="unsaved-cancel"
             className="h-11 flex-1 rounded-lg border border-neutral-700 text-sm font-semibold text-neutral-200 active:bg-neutral-800"
           >

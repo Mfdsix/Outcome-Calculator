@@ -330,4 +330,93 @@ describe("App — W/M Enter with allocated expenses (spec §Adv-3)", () => {
       expect(key >= fromKey && key < toKey).toBe(true);
     }
   });
+
+  it("editing an item from W/M (outside today) and toggling allocation still commits on Enter", async () => {
+    // Item occurred 1 day ago with WEEKLY allocation — after closeHistory()
+    // resets period to "day", this item is NOT in the day list, but editOriginal
+    // snapshot lets handleEnter still commit the allocation change.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    listMock.mockResolvedValue({
+      expenses: [
+        {
+          id: "w1",
+          amount: 70000,
+          allocationType: "WEEKLY",
+          occurredAt: yesterday,
+        },
+      ],
+      total: 70000,
+    });
+
+    const user = await renderUnlocked();
+
+    // Open week history
+    await user.click(screen.getByTestId("period-week"));
+    await screen.findByTestId("summary-list");
+
+    // Drill into the day bucket to see the transaction
+    await user.click(screen.getByTestId("key-enter"));
+    expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
+
+    // Edit the transaction
+    await user.click(screen.getByTestId("browse-row-w1"));
+    await user.click(screen.getByTestId("key-enter"));
+    await screen.findByTestId("amount-display");
+
+    // Toggle allocation to MONTHLY
+    await user.click(screen.getByTestId("allocation-monthly"));
+
+    // Enter — should commit the allocation change via commitUpdate
+    // (amount unchanged, allocation changed → direct commit, no UpdateDialog)
+    await user.click(screen.getByTestId("key-enter"));
+
+    expect(updateMock).toHaveBeenCalledWith("w1", { allocationType: "MONTHLY" });
+  });
+
+  it("editing an item from W/M and changing amount opens UpdateDialog then commits", async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    listMock.mockResolvedValue({
+      expenses: [
+        {
+          id: "w1",
+          amount: 70000,
+          allocationType: "WEEKLY",
+          occurredAt: yesterday,
+        },
+      ],
+      total: 70000,
+    });
+
+    const user = await renderUnlocked();
+
+    await user.click(screen.getByTestId("period-week"));
+    await screen.findByTestId("summary-list");
+    await user.click(screen.getByTestId("key-enter"));
+    expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("browse-row-w1"));
+    await user.click(screen.getByTestId("key-enter"));
+    await screen.findByTestId("amount-display");
+
+    // Clear and enter a new amount: 90000
+    await user.click(screen.getByTestId("key-9"));
+    // The display shows "970000" because the old value is still loaded; clear first
+    for (let i = 0; i < 6; i += 1) {
+      await user.click(screen.getByTestId("key-backspace"));
+    }
+    await user.click(screen.getByTestId("key-9"));
+    await user.click(screen.getByTestId("key-0"));
+    await user.click(screen.getByTestId("key-0"));
+    await user.click(screen.getByTestId("key-0"));
+    await user.click(screen.getByTestId("key-0"));
+
+    // Enter → UpdateDialog
+    await user.click(screen.getByTestId("key-enter"));
+    expect(await screen.findByTestId("update-dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("update-confirm"));
+
+    // Amount changed, allocation unchanged (still WEEKLY) → only amount sent
+    expect(updateMock).toHaveBeenCalledWith("w1", { amount: 90000 });
+  });
 });

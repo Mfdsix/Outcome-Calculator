@@ -337,6 +337,7 @@ function AppBody({ logout }: { logout: () => void }) {
   const [banner, setBanner] = useState<string | null>(null);
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
   const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
+  const [editOriginal, setEditOriginal] = useState<ExpenseDto | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
   const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
@@ -462,7 +463,10 @@ function AppBody({ logout }: { logout: () => void }) {
   }
   const transactionKey = transactionKeyRef.current;
 
-  const clearEditOrigin = useCallback(() => setEditOrigin(null), []);
+  const clearEditOrigin = useCallback(() => {
+    setEditOrigin(null);
+    setEditOriginal(null);
+  }, []);
 
   /** Restore history state captured in editOrigin (period + panel + selection). */
   const restoreHistory = useCallback(
@@ -478,22 +482,33 @@ function AppBody({ logout }: { logout: () => void }) {
     [openHistory, enterDrill, setSelectedKey],
   );
 
+  /** Discard edit & restore history (used by UnsavedDialog "Kembali" button). */
+  const handleUnsavedDiscard = useCallback(() => {
+    setShowUnsaved(false);
+    calc.clear();
+    restoreHistory(editOrigin);
+    clearEditOrigin();
+  }, [calc, editOrigin, restoreHistory, clearEditOrigin]);
+
+  /** Dismiss UnsavedDialog only — stay in edit mode (backdrop / Escape). */
+  const handleUnsavedDismiss = useCallback(() => {
+    setShowUnsaved(false);
+  }, []);
+
   const handleEditBack = useCallback(() => {
-    const original =
-      calc.editingId !== null ? expenses.find((item) => item.id === calc.editingId) : undefined;
-    const dirty =
-      calc.isEditing &&
-      calc.editingId !== null &&
-      original !== undefined &&
-      (calc.amount !== original.amount || calc.allocationType !== (original.allocationType ?? "NONE"));
-    if (dirty) {
-      setShowUnsaved(true);
-      return;
+    if (calc.isEditing && calc.editingId !== null && editOriginal !== null) {
+      const dirty =
+        calc.amount !== editOriginal.amount ||
+        calc.allocationType !== (editOriginal.allocationType ?? "NONE");
+      if (dirty) {
+        setShowUnsaved(true);
+        return;
+      }
     }
     calc.clear();
     restoreHistory(editOrigin);
     clearEditOrigin();
-  }, [calc, expenses, editOrigin, restoreHistory, clearEditOrigin]);
+  }, [calc, editOriginal, editOrigin, restoreHistory, clearEditOrigin]);
 
   // --- Offline outbox helpers (plan §4/§6) ------------------------------------
 
@@ -599,11 +614,14 @@ function AppBody({ logout }: { logout: () => void }) {
   );
 
   /** Commit a pending edit: optimistic update + API call + flash/error.
-   * Extracted so handleEnter and UpdateDialog confirm share one path.
-   * Includes allocationType from calc (spec §3: AdvancedControls). */
+    * Extracted so handleEnter and UpdateDialog confirm share one path.
+    * Uses editOriginal (snapshot taken at edit start) so edits of items from
+    * W/M periods that have since been filtered out still commit correctly.
+    * Includes allocationType from calc (spec §3: AdvancedControls). */
   const commitUpdate = useCallback(
     async (id: string, amount: number) => {
-      const previous = expenses.find((item) => item.id === id);
+      const previous =
+        (editOriginal?.id === id ? editOriginal : expenses.find((item) => item.id === id)) ?? null;
       const optimistic = { ...previous, amount, allocationType: calc.allocationType } as ExpenseDto;
       if (previous) {
         applyOptimisticUpdate(optimistic);
@@ -667,6 +685,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
     },
     [
+      editOriginal,
       expenses,
       online,
       applyOptimisticUpdate,
@@ -690,7 +709,7 @@ function AppBody({ logout }: { logout: () => void }) {
 
     if (calc.isEditing && calc.editingId) {
       const id = calc.editingId;
-      const previous = expenses.find((item) => item.id === id);
+      const previous = (editOriginal?.id === id ? editOriginal : expenses.find((item) => item.id === id));
       if (previous && previous.amount === amount && (previous.allocationType ?? "NONE") === calc.allocationType) {
         // No change — dismiss edit silently.
         calc.clear();
@@ -706,6 +725,11 @@ function AppBody({ logout }: { logout: () => void }) {
       if (previous && (previous.amount !== amount || (previous.allocationType ?? "NONE") !== calc.allocationType)) {
         // Defer to UpdateDialog; keep the input so the user can review.
         setPendingUpdate({ id, amount });
+        return;
+      }
+      // No previous found — still attempt commit using calc + editOriginal if available.
+      if (editOriginal) {
+        void commitUpdate(id, amount);
         return;
       }
       return;
@@ -751,6 +775,7 @@ function AppBody({ logout }: { logout: () => void }) {
   }, [
     calc,
     expenses,
+    editOriginal,
     online,
     applyOptimisticCreate,
     revertOptimisticCreate,
@@ -934,6 +959,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     const expense = expenses.find((item) => item.id === id);
     if (!expense) return;
     setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
+    setEditOriginal(expense);
     calc.startEdit(expense.id, expense.amount, expense.allocationType);
     closeHistory();
   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
@@ -969,7 +995,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
     if (!id) return;
-    const expense = expenses.find((item) => item.id === id);
+    const expense = expenses.find((item) => item.id === id) ?? (id === editOriginal?.id ? editOriginal : null);
     setDeleteTarget(null);
     // Drop an in-progress edit if we are deleting the very item being edited.
     if (calc.editingId === id) {
@@ -1023,6 +1049,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     }
   }, [
     expenses,
+    editOriginal,
     online,
     applyOptimisticCreate,
     applyOptimisticDelete,
@@ -1463,15 +1490,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             onBackspace={calc.pressBackspace}
             onEnter={() => void handleEnter()}
             enterFlash={enterFlash}
-             enterDisabled={
-               calc.amount <= 0 ||
-               Boolean(
-                 calc.isEditing &&
-                 calc.editingId &&
-                 (expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount) &&
-                 ((expenses.find((i) => i.id === calc.editingId)?.allocationType ?? "NONE") === calc.allocationType),
-               )
-             }
+            enterDisabled={
+              calc.amount <= 0 ||
+              Boolean(
+                calc.isEditing &&
+                calc.editingId &&
+                (editOriginal?.amount === calc.amount) &&
+                ((editOriginal?.allocationType ?? "NONE") === calc.allocationType),
+              )
+            }
           />
         </>
       )}
@@ -1486,7 +1513,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             setShowUnsaved(false);
             void handleEnter();
           }}
-          onCancel={handleEditBack}
+          onDiscard={handleUnsavedDiscard}
+          onDismiss={handleUnsavedDismiss}
         />
       )}
 
@@ -1501,7 +1529,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       {pendingUpdate && (
         <UpdateDialog
-          fromLabel={formatIDR(expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0)}
+          fromLabel={formatIDR(pendingUpdate.id === editOriginal?.id
+            ? editOriginal.amount
+            : (expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0))}
           toLabel={formatIDR(pendingUpdate.amount)}
           busy={false}
           onCancel={() => setPendingUpdate(null)}
