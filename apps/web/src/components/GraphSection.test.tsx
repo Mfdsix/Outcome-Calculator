@@ -34,6 +34,11 @@ const mockBuckets: ChartBucket[] = [
   { key: "2026-09-25T10", label: "10", total: 26_785, isCurrent: false, kind: "hour" },
 ];
 
+const mockDayBuckets: ChartBucket[] = [
+  { key: "2026-09-25", label: "25", total: 190_019, isCurrent: false, kind: "day" },
+  { key: "2026-09-26", label: "26", total: 47_000, isCurrent: false, kind: "day" },
+];
+
 describe("GraphSection", () => {
   it("renders a bare chart with no header delta when there is no budget", () => {
     render(<GraphSection buckets={mockBuckets} snapshot={null} />);
@@ -66,6 +71,56 @@ describe("GraphSection", () => {
 
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
     expect(screen.queryByTestId("chart-budget-delta")).not.toBeInTheDocument();
+  });
+
+  it("marks over-cap days faded red, solid red when selected", () => {
+    render(<GraphSection buckets={mockDayBuckets} snapshot={mockUnder} dailyCap={85_000} />);
+
+    const overFill = screen
+      .getByTestId("bar-2026-09-25")
+      .querySelector("span.w-full");
+    expect(overFill).not.toBeNull();
+    expect(overFill).toHaveClass("bg-red-500/30");
+
+    const underFill = screen
+      .getByTestId("bar-2026-09-26")
+      .querySelector("span.w-full");
+    expect(underFill).not.toBeNull();
+    expect(underFill).not.toHaveClass("bg-red-500/30");
+  });
+
+  it("selected over-cap day renders solid red with a red value label", () => {
+    render(
+      <GraphSection
+        buckets={mockDayBuckets}
+        snapshot={mockUnder}
+        dailyCap={85_000}
+        selectedKey="2026-09-25"
+      />,
+    );
+
+    const fill = screen.getByTestId("bar-2026-09-25").querySelector("span.w-full");
+    expect(fill).not.toBeNull();
+    expect(fill).toHaveClass("bg-red-500");
+    expect(screen.getByTestId("bar-value-2026-09-25")).toHaveClass("text-red-300");
+  });
+
+  it("month pairs compare against cap × 2 days (no all-red month)", () => {
+    const pairBuckets: ChartBucket[] = [
+      { key: "2026-09-20", label: "20", total: 100_000, isCurrent: false, kind: "day", endKey: "2026-09-21" },
+      { key: "2026-09-22", label: "22", total: 190_019, isCurrent: false, kind: "day", endKey: "2026-09-23" },
+    ];
+    render(<GraphSection buckets={pairBuckets} snapshot={mockUnder} dailyCap={85_000} />);
+
+    // 100k < 2 × 85k → under, stays neutral.
+    const underFill = screen.getByTestId("bar-2026-09-20").querySelector("span.w-full");
+    expect(underFill).not.toBeNull();
+    expect(underFill).not.toHaveClass("bg-red-500/30");
+
+    // 190.019 > 2 × 85k → over, faded red.
+    const overFill = screen.getByTestId("bar-2026-09-22").querySelector("span.w-full");
+    expect(overFill).not.toBeNull();
+    expect(overFill).toHaveClass("bg-red-500/30");
   });
 
   it("passes selectedKey/onSelect through to BarChart", async () => {

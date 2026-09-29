@@ -1464,6 +1464,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               onSelect={handleBarSelect}
               title={chartTitle}
               snapshot={budgetSnapshot}
+              dailyCap={budget.active?.type === "daily" ? budget.active.amount : null}
             />
           </div>
 

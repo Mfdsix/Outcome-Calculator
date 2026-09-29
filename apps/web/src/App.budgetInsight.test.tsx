@@ -154,6 +154,21 @@ describe("App — budget delta in graph (no toggle)", () => {
     expect(screen.queryByTestId("chart-budget-delta")).not.toBeInTheDocument();
   });
 
+  it("W mode marks the over-cap day solid red when selected", async () => {
+    seedExpenses([{ id: "e1", amount: 150_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-week"));
+
+    // Today (150k > 100k daily cap) is auto-selected → solid red.
+    const key = `${TODAY_YEAR}-${TODAY_MONTH}-${TODAY_DAY}`;
+    const bar = await screen.findByTestId(`bar-${key}`);
+    const fill = bar.querySelector("span.w-full");
+    expect(fill).not.toBeNull();
+    expect(fill).toHaveClass("bg-red-500");
+    expect(screen.getByTestId("chart-budget-delta")).toBeInTheDocument();
+  });
+
   it("allocation seam: WEEKLY 700k contributes 100k/day (deferred to allocation branch)", () => {
     // TODO: when allocation engine lands, this test should verify that a
     // WEEKLY expense of 700k contributes 100k/day to the daily snapshot.

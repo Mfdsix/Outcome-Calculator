@@ -12,6 +12,9 @@ export interface GraphSectionProps {
 
   // Budget overlay (null = no budget → bare chart)
   snapshot: BudgetSnapshot | { hasOverlap: false } | null;
+
+  /** Daily cap for over-day marking (daily budgets only; null = off). */
+  dailyCap?: number | null;
 }
 
 /**
@@ -26,6 +29,7 @@ export function GraphSection({
   onSelect,
   title,
   snapshot,
+  dailyCap = null,
 }: GraphSectionProps) {
   const budgetDelta =
     snapshot !== null && "remaining" in snapshot
@@ -42,6 +46,7 @@ export function GraphSection({
         onSelect={onSelect}
         title={title}
         budgetDelta={budgetDelta}
+        overCap={dailyCap}
       />
     </div>
   );
