@@ -1,4 +1,4 @@
-import { formatIDRAbbreviated } from "../lib/currency";
+import { formatIDR, formatIDRAbbreviated } from "../lib/currency";
 import type { ChartBucket } from "../lib/chart";
 
 export interface BarChartProps {
@@ -6,6 +6,12 @@ export interface BarChartProps {
   selectedKey?: string | null;
   onSelect?: (key: string) => void;
   title?: string;
+  /**
+   * Signed budget delta for the visible period (remaining >= 0, overspent < 0).
+   * When provided, the header shows only the [+/-] figure; when absent the
+   * chart renders bare (no header row at all).
+   */
+  budgetDelta?: number | null;
 }
 
 /**
@@ -14,7 +20,7 @@ export interface BarChartProps {
  * is provided browse selection takes over highlighting. Pure CSS flex bars —
  * no chart library.
  */
-export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProps) {
+export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = null }: BarChartProps) {
   if (buckets.length === 0) return null;
 
   const max = Math.max(0, ...buckets.map((bucket) => bucket.total));
@@ -24,14 +30,16 @@ export function BarChart({ buckets, selectedKey, onSelect, title }: BarChartProp
 
   return (
     <div className="mb-3 rounded-xl border border-neutral-800 bg-neutral-900/50 px-3 pb-2 pt-3" data-testid="bar-chart">
-      <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-widest text-neutral-500">{granularityLabel}</span>
-        {hasData ? (
-          <span className="text-[11px] text-neutral-500">Puncak {formatIDRAbbreviated(max)}</span>
-        ) : (
-          <span aria-hidden="true" />
-        )}
-      </div>
+      {budgetDelta !== null && (
+        <div className="mb-2 flex items-center justify-end">
+          <span
+            data-testid="chart-budget-delta"
+            className={`text-sm font-semibold tabular-nums ${budgetDelta >= 0 ? "text-emerald-300" : "text-red-300"}`}
+          >
+            {budgetDelta >= 0 ? `+${formatIDR(budgetDelta)}` : `−${formatIDR(-budgetDelta)}`}
+          </span>
+        </div>
+      )}
 
       <div className="flex h-24 items-end gap-[3px]" role="img" aria-label={`Pengeluaran ${granularityLabel.toLowerCase()}`}>
         {buckets.map((bucket) => {
