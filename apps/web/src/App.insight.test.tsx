@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -229,5 +229,74 @@ describe("App — insight screen (tap & ⓘ)", () => {
     expect(await screen.findByTestId("insight-item-finished")).toBeInTheDocument();
     // No CTA — the budget exists; manage it on the budget screen.
     expect(screen.queryByTestId("insight-cta-budget")).not.toBeInTheDocument();
+  });
+
+  it("uses a semantic switch (role=switch, aria-checked) and toggles aria-label", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await screen.findByTestId("insight-ticker");
+
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
+    await screen.findByTestId("insight-screen");
+
+    const toggle = screen.getByTestId("insight-ticker-toggle");
+    expect(toggle).toHaveAttribute("role", "switch");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toHaveAttribute("aria-label", "Matikan running text");
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAttribute("aria-label", "Nyalakan running text");
+
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("toggle OFF hides ticker after returning to calculator and persists across remount", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    let user = await renderUnlocked();
+    await screen.findByTestId("insight-ticker");
+
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
+    await screen.findByTestId("insight-screen");
+    await user.click(screen.getByTestId("insight-ticker-toggle"));
+
+    expect(localStorage.getItem("expense-app.insight-ticker-visible")).toBe("false");
+
+    await user.click(screen.getByTestId("insight-back"));
+    expect(await screen.findByTestId("keypad")).toBeInTheDocument();
+    expect(screen.queryByTestId("insight-ticker")).not.toBeInTheDocument();
+
+    // Remount (simulate reload) — localStorage persists the "false" preference.
+    cleanup();
+    user = await renderUnlocked();
+    expect(await screen.findByTestId("keypad")).toBeInTheDocument();
+    expect(screen.queryByTestId("insight-ticker")).not.toBeInTheDocument();
+  });
+
+  it("toggle ON persists visible across remount (seed OFF first)", async () => {
+    localStorage.setItem("expense-app.insight-ticker-visible", "false");
+    getActiveMock.mockResolvedValue(activeBudget());
+
+    // Ticker hidden from persisted false on initial mount.
+    let user = await renderUnlocked();
+    expect(screen.queryByTestId("insight-ticker")).not.toBeInTheDocument();
+
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-insight"));
+    await screen.findByTestId("insight-screen");
+    await user.click(screen.getByTestId("insight-ticker-toggle"));
+
+    expect(localStorage.getItem("expense-app.insight-ticker-visible")).toBe("true");
+
+    await user.click(screen.getByTestId("insight-back"));
+    expect(await screen.findByTestId("insight-ticker")).toBeInTheDocument();
+
+    // Remount — persists visible.
+    cleanup();
+    user = await renderUnlocked();
+    expect(await screen.findByTestId("insight-ticker")).toBeInTheDocument();
   });
 });

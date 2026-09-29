@@ -14,13 +14,14 @@ import {
   civilToday,
   digitsToAmount,
   formatIDR,
-  formatIDRAbbreviated,
   normalizeDigits,
   suggestCopyDates,
+  formatDateShort,
 } from "@expense-app/shared";
 import type { BudgetDashboardData } from "@expense-app/shared";
 
 import { BudgetProgress, periodLabelOf } from "./BudgetProgress";
+import { BudgetPeriodChart } from "./BudgetPeriodChart";
 import { APP_TIMEZONE } from "../lib/periods";
 import { relativeDayLabel } from "../lib/dayLabels";
 
@@ -146,8 +147,8 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="budget-screen">
-      {/* Top bar */}
-      <div className="flex items-center gap-2 pb-2">
+      {/* Sticky top bar: ← Budget ... [ + Tambah ] (mock §A) */}
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-900/80 pb-2 backdrop-blur-sm">
         <button
           type="button"
           aria-label="Kembali ke kalkulator"
@@ -158,6 +159,16 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           ←
         </button>
         <h1 className="text-base font-semibold text-neutral-100">Budget</h1>
+        {active !== null && !showFormState && (
+          <button
+            type="button"
+            data-testid="budget-form-toggle"
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 rounded-full border border-neutral-800/10 bg-white px-3.5 py-1.5 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-neutral-200 active:bg-neutral-300"
+          >
+            + Tambah
+          </button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-2">
@@ -285,20 +296,10 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           </p>
         )}
 
-        {/* Create / replace form — collapsed to a "Tambah" button when an active
-            (non-prefill) budget exists; expanded on toggle, prefill, or empty. */}
-        {active !== null && !showFormState ? (
-          <div>
-            <button
-              type="button"
-              data-testid="budget-form-toggle"
-              onClick={() => setShowForm(true)}
-              className="h-11 w-full rounded-lg border border-neutral-700 text-sm font-semibold text-neutral-300 active:bg-neutral-800"
-            >
-              + Tambah
-            </button>
-          </div>
-        ) : (
+        {/* Create / replace form — expanded on toggle, prefill, or empty.
+            The "Tambah" pill lives in the header (plan §A); this block renders
+            nothing when collapsed (toggle handled by header). */}
+        {showFormState && (
           <section data-testid="budget-form-section">
             <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
               {prefill
@@ -400,9 +401,9 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               {busy ? "Menyimpan…" : "Simpan budget"}
             </button>
             </form>
-          </section>
-        )}
-      </div>
+         </section>
+         )}
+       </div>
 
       {/* Soft-delete confirm: history keeps the row (plan §1 — no hard delete) */}
       {confirmRemove && (
@@ -471,22 +472,26 @@ function BudgetToday({
   const delta = cap - todaySpent;
 
   return (
-    <div data-testid="budget-today" className="space-y-1.5">
+    <div
+      data-testid="budget-today"
+      className="relative overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
+    >
+      <div className="pointer-events-none absolute -mr-10 -mt-10 right-0 top-0 h-24 w-24 rounded-full bg-emerald-500/5 blur-2xl" />
       <div className="flex items-baseline justify-between">
-        <span className="text-xs uppercase tracking-widest text-neutral-500">
-          Hari ini
+        <span className="text-[10px] uppercase tracking-widest text-neutral-500">
+          HARI INI
         </span>
         <span
-          className={`text-2xl font-light tabular-nums ${todayStatus === "over" ? "text-red-300" : "text-neutral-50"}`}
+          className={`text-3xl font-bold tabular-nums ${todayStatus === "over" ? "text-red-300" : "text-neutral-100"}`}
           data-testid="budget-today-spent">
           {formatIDR(todaySpent)}
         </span>
       </div>
-      <div className="text-xs tabular-nums text-neutral-500">
-        dari {formatIDR(cap)}
+      <div className="mt-1 text-xs tabular-nums text-neutral-500">
+        / {formatIDR(cap)}
       </div>
       <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800"
+        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-800"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
@@ -494,16 +499,16 @@ function BudgetToday({
         aria-label="Progres hari ini"
       >
         <div
-          className={`h-full rounded-full ${barColor} transition-[width] duration-500`}
+          className={`h-full rounded-full ${barColor} shadow-[0_0_8px_rgba(34,197,94,0.4)] transition-[width] duration-500`}
           style={{ width: `${pct}%` }}
         />
       </div>
       {isDaily && (
         <p
-          className={`text-center text-sm font-semibold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}
+          className={`mt-2 flex items-center justify-center gap-1 text-center text-sm font-semibold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}
           data-testid="budget-today-delta">
           {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
-          <span className="ml-1.5 text-xs font-normal text-neutral-500">
+          <span className="text-xs font-normal text-neutral-500">
             {delta >= 0 ? "tersisa hari ini" : "melewati budget"}
           </span>
         </p>
@@ -527,7 +532,7 @@ function BudgetPeriod({
   const behind = pos.position < 0;
 
   return (
-    <div data-testid="budget-period" className="space-y-2">
+    <div data-testid="budget-period" className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 mb-6">
       <div className="flex items-center justify-between">
         <span className="text-xs uppercase tracking-widest text-neutral-500">
           Periode budget
@@ -549,19 +554,6 @@ function BudgetPeriod({
           {formatIDR(pos.spent)}
         </span>
       </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-neutral-800"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.min(100, pos.progressPct)}
-        aria-label="Progres periode"
-      >
-        <div
-          className={`h-full rounded-full ${pos.status === "over" ? "bg-red-500" : pos.status === "warning" ? "bg-amber-500" : "bg-emerald-500"} transition-[width] duration-500`}
-          style={{ width: `${Math.min(100, pos.progressPct)}%` }}
-        />
-      </div>
 
       {/* Signed position headline: the "POSISI SAAT INI" answer. */}
       <p
@@ -578,6 +570,18 @@ function BudgetPeriod({
               : "tersisa dari budget"}
         </span>
       </p>
+
+      {/* Diverging bar chart (mock §C) — daily: cap−total per day; full: single-direction total */}
+      <BudgetPeriodChart days={dashboard.days} type={dashboard.type} />
+      {/* Screen-reader progress (chart is role="img"; keep a real progressbar for AT). */}
+      <div
+        className="sr-only"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.min(100, pos.progressPct)}
+        aria-label="Progres periode"
+      />
 
       {/* Full pace: spent % vs elapsed % of the period (no fake daily deltas). */}
       {!isDaily && dashboard.totalRangeDays > 0 && (
@@ -611,7 +615,6 @@ function BudgetDayHistory({
   maxInitial?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const maxTotal = Math.max(...days.map((d) => d.total), 1);
   // Newest first (today on top); the 14-row default keeps the latest days.
   const ordered = useMemo(() => [...days].reverse(), [days]);
   const visible = expanded ? ordered : ordered.slice(0, maxInitial);
@@ -622,40 +625,36 @@ function BudgetDayHistory({
       <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
         Riwayat harian
       </h2>
-      <ul className="divide-y divide-neutral-800/80 rounded-xl border border-neutral-800 bg-neutral-900/50">
+      <ul className="divide-y divide-neutral-800/80 border border-neutral-800">
         {visible.map((day) => {
           const delta = "delta" in day ? day.delta : null;
-          const pct = (day.total / maxTotal) * 100;
           return (
             <li
               key={day.date}
               data-testid={`budget-day-row-${day.date}`}
-              className="flex items-center gap-2 px-3 py-2">
-              <span className="w-16 text-xs text-neutral-500" data-testid={`budget-day-label-${day.date}`}>
-                {relativeDayLabel(day.date, new Date())}
-              </span>
-              <span className="w-14 text-right text-xs tabular-nums text-neutral-400">
-                {day.date}
-              </span>
-              <span className="flex-1 text-right text-sm font-medium tabular-nums text-neutral-200">
-                {formatIDR(day.total)}
-              </span>
-              {delta !== null && (
+              className="flex items-center justify-between gap-2 py-3 px-1 hover:bg-white/5">
+              <div className="flex flex-col">
                 <span
-                  className={`w-14 text-right text-xs tabular-nums ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
-                  data-testid={`budget-day-delta-${day.date}`}>
-                  {delta >= 0 ? `+${formatIDRAbbreviated(delta)}` : `−${formatIDRAbbreviated(-delta)}`}
+                  className="text-sm font-medium text-neutral-200"
+                  data-testid={`budget-day-label-${day.date}`}>
+                  {relativeDayLabel(day.date, new Date())}
                 </span>
-              )}
-              <span className="w-10" aria-label={`mini bar ${pct}%`}>
-                <div
-                  className="h-1.5 w-full rounded-full bg-neutral-800">
-                  <div
-                    className="h-full rounded-full bg-neutral-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </span>
+                <span className="text-xs text-neutral-500">
+                  {formatDateShort(new Date(`${day.date}T12:00:00+07:00`), APP_TIMEZONE)}
+                </span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-sm font-medium tabular-nums text-neutral-100">
+                  {formatIDR(day.total)}
+                </span>
+                {delta !== null && (
+                  <span
+                    className={`text-xs tabular-nums ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                    data-testid={`budget-day-delta-${day.date}`}>
+                    {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
+                  </span>
+                )}
+              </div>
             </li>
           );
         })}

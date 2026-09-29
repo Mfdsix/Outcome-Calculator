@@ -9,6 +9,7 @@ import {
 import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
+import { GraphSection } from "../components/GraphSection";
 import { AdvancedControls } from "../components/AdvancedControls";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
@@ -50,6 +51,8 @@ import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
 import { applyTheme } from "../lib/theme";
+import { loadTickerVisible, saveTickerVisible } from "../lib/tickerPref";
+import { useBudgetSnapshot } from "../lib/budgetSnapshot";
 import { relativeDayLabel } from "../lib/dayLabels";
 import { queueOfflineCreate, queueOfflineDelete, queueOfflineUpdate } from "../lib/sync";
 import type { EditOrigin, Period } from "../types/ui";
@@ -341,7 +344,15 @@ function AppBody({ logout }: { logout: () => void }) {
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
   const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
-  const [insightTickerVisible, setInsightTickerVisible] = useState(true);
+  const [insightTickerVisible, setInsightTickerVisible] = useState(loadTickerVisible);
+  const toggleTicker = useCallback(() => {
+    setInsightTickerVisible((v) => {
+      const next = !v;
+      saveTickerVisible(next);
+      return next;
+    });
+  }, []);
+  const [graphMode, setGraphMode] = useState<"spending" | "budget">("spending");
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -826,6 +837,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           : twoDayBuckets(currentPeriodRange(period), expenses, new Date()),
     [period, expenses],
   );
+
+  const budgetSnapshot = useBudgetSnapshot(period, expenses, budget.active);
 
   /**
    * Selection key fed to BarChart. In bucket-facing modes (W/M summary) the
@@ -1425,7 +1438,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           insights={insights}
           hasBudget={budget.active !== null}
           tickerVisible={insightTickerVisible}
-          onToggleTicker={() => setInsightTickerVisible((v) => !v)}
+          onToggleTicker={toggleTicker}
           onBack={closeInsight}
           onOpenBudget={openBudget}
         />
@@ -1446,11 +1459,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           )}
 
           <div className="shrink-0">
-            <BarChart
+            <GraphSection
+              activeBudget={budget.active !== null}
+              mode={graphMode}
+              onModeChange={setGraphMode}
               buckets={chartBuckets}
               selectedKey={chartSelectedKey}
               onSelect={handleBarSelect}
               title={chartTitle}
+              snapshot={budgetSnapshot}
             />
           </div>
 
@@ -1476,7 +1493,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         </>
       ) : (
         <>
-          {isHomeScreen && calc.isEditing ? (
+          {(isHomeScreen && calc.isEditing) ? (
             <AdvancedControls
               allocationType={calc.allocationType}
               onToggle={(type) => {

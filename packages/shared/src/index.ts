@@ -6,4 +6,5 @@ export * from "./auth";
 export * from "./budget";
 export * from "./budgetDashboard";
 export * from "./insights";
+export * from "./budgetSnapshot";
 export * from "./allocation";

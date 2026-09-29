@@ -95,8 +95,8 @@ export function BudgetProgress({
   const effectiveStatus: BudgetStatus | "finished" = finished ? "finished" : status;
   return (
     <div
-      data-testid="budget-card"
-      className={`rounded-xl border px-4 py-3 ${
+       data-testid="budget-card"
+       className={`mb-4 rounded-xl border px-4 py-3 ${
         finished
           ? "border-neutral-800 bg-neutral-900/40 opacity-60"
           : status === "over"

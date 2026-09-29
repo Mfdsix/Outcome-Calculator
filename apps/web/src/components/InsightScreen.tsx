@@ -40,20 +40,15 @@ export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTick
           ←
         </button>
         <span className="text-base font-semibold text-neutral-100">Insight</span>
-        <span
-          className="relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors"
+        <button
+          type="button"
+          role="switch"
+          aria-checked={tickerVisible}
+          aria-label={tickerVisible ? "Matikan running text" : "Nyalakan running text"}
           onClick={onToggleTicker}
           data-testid="insight-ticker-toggle"
-          aria-label={tickerVisible ? "Matikan running text" : "Nyalakan running text"}
+          className="relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-emerald-500"
         >
-          <input
-            type="checkbox"
-            checked={tickerVisible}
-            onChange={() => {}}
-            readOnly
-            className="sr-only"
-            aria-label="Tampilkan running text di beranda"
-          />
           <span
             className={`absolute inset-0 rounded-full transition-colors ${
               tickerVisible ? "bg-emerald-600" : "bg-neutral-600"
@@ -64,8 +59,9 @@ export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTick
             className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
               tickerVisible ? "left-4" : "left-0.5"
             }`}
+            aria-hidden="true"
           />
-        </span>
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">

@@ -454,6 +454,23 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     expect(await screen.findByTestId("budget-form")).toBeInTheDocument();
   });
 
+  it("header Tambah pill opens the form from collapsed state", async () => {
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-card");
+
+    // Header pill is visible in the sticky top bar.
+    expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
+
+    // Click the header Tambah pill → form section appears.
+    await user.click(screen.getByTestId("budget-form-toggle"));
+    expect(await screen.findByTestId("budget-form")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-form-section")).toBeInTheDocument();
+  });
+
   it("daily under today → today delta +Rp tersisa + period behind + day deltas", async () => {
     // Daily 85k, Sep 25–28. Series: 76.785 / 153.405 / 190.019 / 47.000.
     // Allowance 340k, spent 467.209 → position −127.209 (tertinggal).
@@ -672,5 +689,35 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     // After successful create, form collapses.
     await screen.findByTestId("budget-form-toggle");
     expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
+  });
+
+  it("budget-period-chart renders one bar per day in the series", async () => {
+    getActiveMock.mockResolvedValue(
+      activeBudget({
+        type: "daily",
+        amount: 85_000,
+        startDate: "2026-09-25",
+        endDate: "2026-10-25",
+        todaySpent: 47_000,
+        spent: 467_209,
+        remaining: -127_209,
+        progressPct: 137,
+        status: "ok",
+      }),
+    );
+    seriesMock.mockResolvedValue({
+      days: [
+        { date: "2026-09-25", total: 76_785 },
+        { date: "2026-09-26", total: 153_405 },
+        { date: "2026-09-27", total: 190_019 },
+        { date: "2026-09-28", total: 47_000 },
+      ],
+    });
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+
+    await screen.findByTestId("budget-period-chart");
+    expect(screen.getAllByTestId(/^budget-period-bar-\d{4}-\d{2}-\d{2}$/)).toHaveLength(4);
   });
 });
