@@ -1,6 +1,6 @@
 import { clear, createStore, del, get, set, type UseStore } from "idb-keyval";
 
-import type { ExpenseDto } from "@expense-app/shared";
+import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 /**
  * IndexedDB persistence for the offline Today layer (plan §4).
@@ -112,10 +112,10 @@ export interface OutboxOp {
   type: OutboxOpType;
   /** Real expense id for update/delete against the server. */
   realId?: string;
-  /** Client-side temp id for an offline create (temp-…). */
+  /** Client-side temp id for an offline create (temp-...). */
   tempId?: string;
-  /** create → full payload incl. occurredAt; update → { amount }. */
-  payload: { amount: number; occurredAt?: string };
+  /** create → full payload incl. occurredAt + allocationType; update → { amount, allocationType }. */
+  payload: { amount: number; occurredAt?: string; allocationType?: AllocationType };
   /** Wall-clock time the mutation was queued (FIFO ordering + diagnostics). */
   occurredAt: number;
   retries: number;

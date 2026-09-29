@@ -1,6 +1,8 @@
 import type {
   BudgetActiveResponse,
+  BudgetDayPoint,
   BudgetHistoryItem,
+  BudgetSeriesResponse,
   CreateBudgetPayload,
   CreateExpensePayload,
   ExpenseDto,
@@ -240,6 +242,10 @@ export const authApi = {
 export const budgetsApi = {
   getActive(): Promise<BudgetActiveResponse> {
     return request<BudgetActiveResponse>("/api/budgets/active");
+  },
+
+  activeSeries(): Promise<BudgetSeriesResponse> {
+    return request<BudgetSeriesResponse>("/api/budgets/active/series");
   },
 
   history(limit = 20): Promise<{ history: BudgetHistoryItem[] }> {

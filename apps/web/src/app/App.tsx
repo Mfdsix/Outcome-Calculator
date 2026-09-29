@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { TOKEN_REFRESH_MIN_INTERVAL_MS, getZonedParts, formatDateShort, formatTimeShort } from "@expense-app/shared";
+import {
+  TOKEN_REFRESH_MIN_INTERVAL_MS,
+  getZonedParts,
+  formatDateShort,
+  formatTimeShort,
+} from "@expense-app/shared";
+import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
-import { GraphSection } from "../components/GraphSection";
+import { AdvancedControls } from "../components/AdvancedControls";
+import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
 import { BudgetScreen } from "../components/BudgetScreen";
 import { ConnIndicator } from "../components/ConnIndicator";
@@ -37,7 +44,7 @@ import {
   setAuthToken,
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
-import { dailyBuckets, groupExpensesByDay, hourlyBuckets } from "../lib/chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "../lib/chart";
 import { formatIDR, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
@@ -314,12 +321,15 @@ function AppBody({ logout }: { logout: () => void }) {
   const { getStatusNow } = budget;
 
   /** Today's civil-day total (Jakarta) from the live list — optimistic and
-   * offline-cache friendly; feeds the insight engine with zero fetches. */
+   * offline-cache friendly; feeds the insight engine with zero fetches.
+   * Raw sum as-is: allocation never affects totals. */
   const todayTotal = useMemo(() => {
     const { from, to } = currentPeriodRange("day");
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
     return expenses.reduce((sum, item) => {
       const at = new Date(item.occurredAt).getTime();
-      return at >= from.getTime() && at < to.getTime() ? sum + item.amount : sum;
+      return at >= fromMs && at < toMs ? sum + item.amount : sum;
     }, 0);
   }, [expenses]);
   const { insights } = useInsights(budget.active, todayTotal);
@@ -329,6 +339,7 @@ function AppBody({ logout }: { logout: () => void }) {
   const [banner, setBanner] = useState<string | null>(null);
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
   const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
+  const [editOriginal, setEditOriginal] = useState<ExpenseDto | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [budgetNotice, setBudgetNotice] = useState<false | "warning" | "over">(false);
   const [enterFlash, setEnterFlash] = useState<false | "warning" | "over">(false);
@@ -388,14 +399,15 @@ function AppBody({ logout }: { logout: () => void }) {
     onUnauthorized: () => logoutRef.current(),
   });
 
-  // Back online → reload the authoritative day list (also clears cache staleness).
+  // Back online → reload the authoritative list (also clears cache staleness).
+  // Spec §Adv-4: also refresh W/M periods when back online.
   const prevOnlineRef = useRef(online);
   useEffect(() => {
-    if (online && !prevOnlineRef.current && period === "day") {
+    if (online && !prevOnlineRef.current) {
       void refresh();
     }
     prevOnlineRef.current = online;
-  }, [online, period, refresh]);
+  }, [online, refresh]);
 
   // Outbox drained → reload the day so temp rows become server rows.
   const prevPendingRef = useRef(0);
@@ -461,7 +473,10 @@ function AppBody({ logout }: { logout: () => void }) {
   }
   const transactionKey = transactionKeyRef.current;
 
-  const clearEditOrigin = useCallback(() => setEditOrigin(null), []);
+  const clearEditOrigin = useCallback(() => {
+    setEditOrigin(null);
+    setEditOriginal(null);
+  }, []);
 
   /** Restore history state captured in editOrigin (period + panel + selection). */
   const restoreHistory = useCallback(
@@ -477,22 +492,33 @@ function AppBody({ logout }: { logout: () => void }) {
     [openHistory, enterDrill, setSelectedKey],
   );
 
+  /** Discard edit & restore history (used by UnsavedDialog "Kembali" button). */
+  const handleUnsavedDiscard = useCallback(() => {
+    setShowUnsaved(false);
+    calc.clear();
+    restoreHistory(editOrigin);
+    clearEditOrigin();
+  }, [calc, editOrigin, restoreHistory, clearEditOrigin]);
+
+  /** Dismiss UnsavedDialog only — stay in edit mode (backdrop / Escape). */
+  const handleUnsavedDismiss = useCallback(() => {
+    setShowUnsaved(false);
+  }, []);
+
   const handleEditBack = useCallback(() => {
-    const original =
-      calc.editingId !== null ? expenses.find((item) => item.id === calc.editingId) : undefined;
-    const dirty =
-      calc.isEditing &&
-      calc.editingId !== null &&
-      original !== undefined &&
-      calc.amount !== original.amount;
-    if (dirty) {
-      setShowUnsaved(true);
-      return;
+    if (calc.isEditing && calc.editingId !== null && editOriginal !== null) {
+      const dirty =
+        calc.amount !== editOriginal.amount ||
+        calc.allocationType !== (editOriginal.allocationType ?? "NONE");
+      if (dirty) {
+        setShowUnsaved(true);
+        return;
+      }
     }
     calc.clear();
     restoreHistory(editOrigin);
     clearEditOrigin();
-  }, [calc, expenses, editOrigin, restoreHistory, clearEditOrigin]);
+  }, [calc, editOriginal, editOrigin, restoreHistory, clearEditOrigin]);
 
   // --- Offline outbox helpers (plan §4/§6) ------------------------------------
 
@@ -538,9 +564,10 @@ function AppBody({ logout }: { logout: () => void }) {
     });
   }, []);
 
-  /** Patch the snapshot for an offline update/delete of a real row. */
+  /** Patch the snapshot for an offline update/delete of a real row.
+   * Totals stay raw sums as-is. */
   const patchCacheRow = useCallback(
-    async (id: string, next: { amount: number } | null) => {
+    async (id: string, next: { amount: number; allocationType?: AllocationType } | null) => {
       await mutateTodayCache((cache) => {
         const previous = cache.expenses.find((item) => item.id === id);
         if (next === null) {
@@ -550,13 +577,19 @@ function AppBody({ logout }: { logout: () => void }) {
             total: cache.total - (previous?.amount ?? 0),
           };
         }
-        const delta = previous ? next.amount - previous.amount : 0;
+        const updatedExpense = {
+          ...previous,
+          amount: next.amount,
+          allocationType: next.allocationType ?? previous?.allocationType,
+        } as ExpenseDto;
         return {
           ...cache,
           expenses: cache.expenses.map((item) =>
-            item.id === id ? { ...item, amount: next.amount } : item,
+            item.id === id
+              ? updatedExpense
+              : item,
           ),
-          total: cache.total + delta,
+          total: cache.total - (previous?.amount ?? 0) + next.amount,
         };
       });
     },
@@ -576,13 +609,13 @@ function AppBody({ logout }: { logout: () => void }) {
     async (amount: number, occurredAt: string, localId: string) => {
       const token = loadToken();
       if (!token) return;
-      const tempId = await queueOfflineCreate(token, { amount, occurredAt });
+      const tempId = await queueOfflineCreate(token, { amount, occurredAt, allocationType: "NONE" });
       replaceLocalId(localId, tempId, amount);
       markPending(tempId);
       // Persist into the today snapshot so an airplane reload keeps the row.
       await mutateTodayCache((cache) => ({
         ...cache,
-        expenses: [{ id: tempId, amount, occurredAt }, ...cache.expenses],
+        expenses: [{ id: tempId, amount, occurredAt, allocationType: "NONE" }, ...cache.expenses],
         total: cache.total + amount,
       }));
       bumpSync();
@@ -591,19 +624,31 @@ function AppBody({ logout }: { logout: () => void }) {
   );
 
   /** Commit a pending edit: optimistic update + API call + flash/error.
-   * Extracted so handleEnter and UpdateDialog confirm share one path. */
+    * Extracted so handleEnter and UpdateDialog confirm share one path.
+    * Uses editOriginal (snapshot taken at edit start) so edits of items from
+    * W/M periods that have since been filtered out still commit correctly.
+    * Includes allocationType from calc (spec §3: AdvancedControls). */
   const commitUpdate = useCallback(
     async (id: string, amount: number) => {
-      const previous = expenses.find((item) => item.id === id);
+      const previous =
+        (editOriginal?.id === id ? editOriginal : expenses.find((item) => item.id === id)) ?? null;
+      const optimistic = { ...previous, amount, allocationType: calc.allocationType } as ExpenseDto;
       if (previous) {
-        applyOptimisticUpdate({ ...previous, amount });
+        applyOptimisticUpdate(optimistic);
+      }
+      const payload: { amount?: number; allocationType?: AllocationType } = {};
+      if (amount !== previous?.amount) {
+        payload.amount = amount;
+      }
+      if (calc.allocationType !== (previous?.allocationType ?? "NONE")) {
+        payload.allocationType = calc.allocationType;
       }
       if (!online && previous && !previous.id.startsWith("temp-")) {
         const token = loadToken();
         if (token) {
-          await queueOfflineUpdate(token, previous.id, amount);
+          await queueOfflineUpdate(token, previous.id, { amount, allocationType: calc.allocationType });
           markPending(previous.id);
-          await patchCacheRow(previous.id, { amount });
+          await patchCacheRow(previous.id, { amount, allocationType: calc.allocationType });
           bumpSync();
           calc.clear();
           restoreHistory(editOrigin);
@@ -612,7 +657,7 @@ function AppBody({ logout }: { logout: () => void }) {
         }
       }
       try {
-        const saved = await expensesRepository.update(id, { amount });
+        const saved = await expensesRepository.update(id, payload);
         applyOptimisticUpdate(saved);
         doFlash();
         // Amount is in — soft post-Enter budget feedback (plan §3).
@@ -633,8 +678,8 @@ function AppBody({ logout }: { logout: () => void }) {
           } else {
             const token = loadToken();
             if (token) {
-              await queueOfflineUpdate(token, previous.id, amount);
-              await patchCacheRow(previous.id, { amount });
+              await queueOfflineUpdate(token, previous.id, { amount, allocationType: calc.allocationType });
+              await patchCacheRow(previous.id, { amount, allocationType: calc.allocationType });
             }
           }
           markPending(previous.id);
@@ -650,6 +695,7 @@ function AppBody({ logout }: { logout: () => void }) {
       }
     },
     [
+      editOriginal,
       expenses,
       online,
       applyOptimisticUpdate,
@@ -673,27 +719,39 @@ function AppBody({ logout }: { logout: () => void }) {
 
     if (calc.isEditing && calc.editingId) {
       const id = calc.editingId;
-      const previous = expenses.find((item) => item.id === id);
-      if (previous && previous.amount === amount) {
+      const previous = (editOriginal?.id === id ? editOriginal : expenses.find((item) => item.id === id));
+      if (previous && previous.amount === amount && (previous.allocationType ?? "NONE") === calc.allocationType) {
         // No change — dismiss edit silently.
         calc.clear();
         clearEditOrigin();
         restoreHistory(editOrigin);
         return;
       }
-      if (previous && previous.amount !== amount) {
+      if (previous && previous.amount === amount && (previous.allocationType ?? "NONE") !== calc.allocationType) {
+        // AllocationType-only change — commit directly (no UpdateDialog needed).
+        void commitUpdate(id, amount);
+        return;
+      }
+      if (previous && (previous.amount !== amount || (previous.allocationType ?? "NONE") !== calc.allocationType)) {
         // Defer to UpdateDialog; keep the input so the user can review.
         setPendingUpdate({ id, amount });
+        return;
+      }
+      // No previous found — still attempt commit using calc + editOriginal if available.
+      if (editOriginal) {
+        void commitUpdate(id, amount);
         return;
       }
       return;
     }
 
     const occurredAt = new Date().toISOString();
+    // Create from home is always NONE (spec §Adv-2: phase 1 budget/insight gap).
     const optimistic = {
       id: `optimistic-${Date.now()}`,
       amount,
       occurredAt,
+      allocationType: "NONE" as const,
     };
     calc.clear();
     applyOptimisticCreate(optimistic);
@@ -727,6 +785,7 @@ function AppBody({ logout }: { logout: () => void }) {
   }, [
     calc,
     expenses,
+    editOriginal,
     online,
     applyOptimisticCreate,
     revertOptimisticCreate,
@@ -772,7 +831,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     () =>
       period === "day"
         ? hourlyBuckets(expenses, new Date())
-        : dailyBuckets(period, currentPeriodRange(period), expenses, new Date()),
+        : period === "week"
+          ? dailyBuckets(period, currentPeriodRange(period), expenses, new Date())
+          : twoDayBuckets(currentPeriodRange(period), expenses, new Date()),
     [period, expenses],
   );
 
@@ -795,17 +856,37 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
       return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
     }
-    // W/M: selectedKey is already a bucket (day) key.
+    if (period === "month") {
+      // The list selects days but the chart shows pairs — highlight the pair
+      // containing the selected day (or the pair itself as fallback).
+      const pair = selectedKey
+        ? chartBuckets.find((bucket) => bucket.key === selectedKey || bucket.endKey === selectedKey)
+        : undefined;
+      return pair?.key ?? selectedKey;
+    }
+    // W: selectedKey is already a bucket (day) key.
     return selectedKey;
-  }, [inDrill, period, selectedKey, expenses, drillDayKey]);
+  }, [inDrill, period, selectedKey, expenses, drillDayKey, chartBuckets]);
 
   /**
    * Day keys for W/M summary navigation, in the same descending order the sparse
-   * SummaryList renders (newest first). Using this (instead of chartBuckets)
-   * keeps selection + up/down + disabled state aligned to the rows actually
-   * shown, so the highlight never vanishes on a zero-data day.
+   * SummaryList renders (newest first). The month list stays daily even though
+   * its chart pairs days. Using this (instead of chartBuckets) keeps selection
+   * + up/down + disabled state aligned to the rows actually shown, so the
+   * highlight never vanishes on a zero-data day.
    */
-  const navDayKeys = useMemo(() => groupExpensesByDay(expenses).map((d) => d.key), [expenses]);
+  const navDayKeys = useMemo(() => {
+    return groupExpensesByDay(expenses, currentPeriodRange(period)).map((d) => d.key);
+  }, [expenses, period]);
+
+  /** Month-drill pair coverage from the chart buckets (never date math). */
+  const drillPairEndKey = useMemo(
+    () =>
+      period === "month" && inDrill && drillDayKey
+        ? (chartBuckets.find((bucket) => bucket.key === drillDayKey)?.endKey ?? null)
+        : null,
+    [period, inDrill, drillDayKey, chartBuckets],
+  );
 
   const moveTransactionSelection = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
@@ -883,14 +964,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       left: period === "day" && !inDrill,
       right: period === "month" && !inDrill,
     };
-  }, [inDrill, period, expenses, chartBuckets, selectedKey]);
+  }, [inDrill, period, expenses, chartBuckets, navDayKeys, selectedKey]);
 
   const handleEdit = useCallback(() => {
     const id = inDrill ? transactionKey : selectedKey;
     const expense = expenses.find((item) => item.id === id);
     if (!expense) return;
     setEditOrigin({ period, panel: specialPanel, drillDayKey, selectedKey });
-    calc.startEdit(expense.id, expense.amount);
+    setEditOriginal(expense);
+    calc.startEdit(expense.id, expense.amount, expense.allocationType);
     closeHistory();
   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
 
@@ -900,10 +982,23 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       handleEdit();
       return;
     }
-    // Week/Month summary: Enter drills into the highlighted day bucket.
     const fallback = chartBuckets.find((bucket) => bucket.isCurrent)?.key ?? chartBuckets[0]?.key ?? null;
     const target = selectedKey ?? fallback;
-    if (target && chartBuckets.some((bucket) => bucket.key === target)) {
+    if (!target) return;
+    if (period === "month") {
+      // The list selects days but the chart shows pairs — drill the pair
+      // containing the highlighted day (or the pair itself as fallback).
+      const pair = chartBuckets.find(
+        (bucket) => bucket.key === target || bucket.endKey === target,
+      );
+      if (pair) {
+        setDrillDayKey(pair.key);
+        enterDrill();
+      }
+      return;
+    }
+    // Week summary: Enter drills into the highlighted day bucket.
+    if (chartBuckets.some((bucket) => bucket.key === target)) {
       setDrillDayKey(target.slice(0, 10));
       enterDrill();
     }
@@ -912,7 +1007,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
     if (!id) return;
-    const expense = expenses.find((item) => item.id === id);
+    const expense = expenses.find((item) => item.id === id) ?? (id === editOriginal?.id ? editOriginal : null);
     setDeleteTarget(null);
     // Drop an in-progress edit if we are deleting the very item being edited.
     if (calc.editingId === id) {
@@ -966,6 +1061,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     }
   }, [
     expenses,
+    editOriginal,
     online,
     applyOptimisticCreate,
     applyOptimisticDelete,
@@ -1085,8 +1181,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   ]);
 
   /** Clicking a chart bar: in day mode resolve to the first transaction in
-   * that hour bucket (selections stay in the transaction-id domain); otherwise
-   * the bucket key is the selection directly. */
+   * that hour bucket (selections stay in the transaction-id domain); in month
+   * mode resolve the pair to a day with transactions (the list stays daily);
+   * otherwise the bucket key is the selection directly. */
   const handleBarSelect = useCallback(
     (key: string) => {
       if (period === "day" && !inDrill) {
@@ -1100,27 +1197,45 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           return;
         }
       }
+      if (period === "month" && !inDrill) {
+        const pair = chartBuckets.find((bucket) => bucket.key === key);
+        if (pair) {
+          const hasTx = (dayKey: string): boolean =>
+            expenses.some(
+              (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey,
+            );
+          // Prefer the pair start so Enter drills from a stable anchor.
+          setSelectedKey(hasTx(pair.key) ? pair.key : (pair.endKey ?? pair.key));
+          return;
+        }
+      }
       setSelectedKey(key);
     },
-    [period, inDrill, expenses, setSelectedKey],
+    [period, inDrill, expenses, chartBuckets, setSelectedKey],
   );
 
   // --- Derived rows --------------------------------------------------------------
 
   const drillRows = useMemo<BrowseRow[]>(() => {
     if (!inDrill || !drillDayKey) return [];
+    // Month drills cover the whole 2-day pair (drillDayKey = pair start,
+    // drillPairEndKey = pair end or null for an orphan single).
     return expenses
-      .filter(
-        (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
-      )
+      .filter((item) => {
+        const key = dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE));
+        return key === drillDayKey || key === drillPairEndKey;
+      })
       .map((item) => ({
         key: item.id,
         left: formatTimeShort(new Date(item.occurredAt), APP_TIMEZONE),
         right: groupDigits(String(item.amount)),
         id: item.id,
         pending: pendingIds.has(item.id),
+        allocationBadge: item.allocationType && item.allocationType !== "NONE"
+          ? item.allocationType === "WEEKLY" ? "Weekly" : "Monthly"
+          : undefined,
       }));
-  }, [drillDayKey, expenses, inDrill, pendingIds]);
+  }, [drillDayKey, drillPairEndKey, expenses, inDrill, pendingIds]);
 
   /** Build a civil date label (e.g. "15 Sep") from a YYYY-MM-DD bucket key. */
   const dateLabelFromKey = (key: string): string => {
@@ -1131,13 +1246,25 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return formatDateShort(new Date(isoAtMidnight), APP_TIMEZONE);
   };
 
+  /** Pair-range label for month drill/titles (e.g. "20–21 Sep", or "30 Sep–1 Okt").
+   * Without an endKey (orphan single) it degrades to the plain day label. */
+  const pairMidLabel = (startKey: string, endKey?: string): string => {
+    const startLabel = dateLabelFromKey(startKey);
+    if (!endKey || endKey === startKey) return startLabel;
+    const endLabel = dateLabelFromKey(endKey);
+    const [startDay, startMon] = startLabel.split(" ");
+    const [endDay, endMon] = endLabel.split(" ");
+    if (!startDay || !startMon || !endDay || !endMon) return startLabel;
+    return startMon === endMon ? `${startDay}–${endDay} ${startMon}` : `${startLabel}–${endLabel}`;
+  };
+
   /** Current time reference for relative day labels (recomputed each render). */
   const now = useMemo(() => new Date(), []);
 
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
-    // aggregates from the chart buckets.
+    // aggregates (month chart pairs days, but the history list stays daily).
     if (period === "day") {
       return expenses.map((item) => ({
         key: item.id,
@@ -1146,9 +1273,13 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         right: groupDigits(String(item.amount)),
         id: item.id,
         pending: pendingIds.has(item.id),
+        allocationBadge: item.allocationType && item.allocationType !== "NONE"
+          ? item.allocationType === "WEEKLY" ? "Weekly" : "Monthly"
+          : undefined,
       }));
     }
-    return groupExpensesByDay(expenses).map((day) => ({
+    // W/M summary stays per-day even though the month chart pairs days.
+    return groupExpensesByDay(expenses, currentPeriodRange(period)).map((day) => ({
       key: day.key,
       left: relativeDayLabel(day.key, now),
       mid: dateLabelFromKey(day.key),
@@ -1187,18 +1318,20 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     () =>
       inDrill && drillDayKey
         ? expenses
-            .filter(
-              (item) =>
-                dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === drillDayKey,
-            )
+            .filter((item) => {
+              const key = dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE));
+              return key === drillDayKey || key === drillPairEndKey;
+            })
             .reduce((sum, item) => sum + item.amount, 0)
         : 0,
-    [inDrill, drillDayKey, expenses],
+    [inDrill, drillDayKey, drillPairEndKey, expenses],
   );
 
   const chartTitle = useMemo(() => {
     if (inDrill && drillDayKey) {
-      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)} · ${groupDigits(String(drillDayTotal))}`;
+      const datePart =
+        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+      return `${relativeDayLabel(drillDayKey, now)} · ${datePart} · ${groupDigits(String(drillDayTotal))}`;
     }
     // Day hourly chart: the header already anchors to "Per jam" — the Today/total
     // subtitle is redundant, so we leave it blank here.
@@ -1207,7 +1340,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
   const effectivePeriodLabel = useMemo(() => {
     if (inDrill && drillDayKey) {
-      return `${relativeDayLabel(drillDayKey, now)} · ${dateLabelFromKey(drillDayKey)}`;
+      const datePart =
+        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+      return `${relativeDayLabel(drillDayKey, now)} · ${datePart}`;
     }
     return periodLabel;
   }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);
@@ -1269,7 +1404,6 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           highlight={isSpecial ? period : null}
           onOpen={openHistory}
           onActiveTap={inDrill ? exitDrill : closeHistory}
-          disabledVisual={online ? [] : ["week", "month"]}
         />
       )}
 
@@ -1295,6 +1429,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           onBack={closeBudget}
           onCreate={handleBudgetCreate}
           onRemove={handleBudgetRemove}
+          series={budget.series}
+          seriesLoading={budget.seriesLoading}
         />
       ) : isInsight ? (
         <InsightScreen
@@ -1356,13 +1492,17 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         </>
       ) : (
         <>
-          <GraphSection
-            activeBudget={budget.active !== null}
-            mode={graphMode}
-            onModeChange={setGraphMode}
-            buckets={chartBuckets}
-            snapshot={budgetSnapshot}
-          />
+          {(isHomeScreen && calc.isEditing) ? (
+            <AdvancedControls
+              allocationType={calc.allocationType}
+              onToggle={(type) => {
+                const next = type === "NONE" ? "NONE" : type;
+                calc.setAllocationType(next);
+              }}
+            />
+          ) : (
+            <BarChart buckets={chartBuckets} />
+          )}
           <Keypad
             onDigit={calc.pressDigit}
             onBackspace={calc.pressBackspace}
@@ -1373,7 +1513,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               Boolean(
                 calc.isEditing &&
                 calc.editingId &&
-                expenses.find((i) => i.id === calc.editingId)?.amount === calc.amount,
+                (editOriginal?.amount === calc.amount) &&
+                ((editOriginal?.allocationType ?? "NONE") === calc.allocationType),
               )
             }
           />
@@ -1390,7 +1531,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             setShowUnsaved(false);
             void handleEnter();
           }}
-          onCancel={handleEditBack}
+          onDiscard={handleUnsavedDiscard}
+          onDismiss={handleUnsavedDismiss}
         />
       )}
 
@@ -1405,7 +1547,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       {pendingUpdate && (
         <UpdateDialog
-          fromLabel={formatIDR(expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0)}
+          fromLabel={formatIDR(pendingUpdate.id === editOriginal?.id
+            ? editOriginal.amount
+            : (expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0))}
           toLabel={formatIDR(pendingUpdate.amount)}
           busy={false}
           onCancel={() => setPendingUpdate(null)}

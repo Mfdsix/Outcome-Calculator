@@ -20,7 +20,16 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   const app = Fastify({ logger: options.logger ?? false });
 
-  await app.register(cors, { origin: true });
+  // NOTE: @fastify/cors defaults to `GET,HEAD,POST` only. The web client
+  // also sends PATCH (expense edit) and DELETE (expense/budget remove) with
+  // Authorization + JSON bodies, which trigger OPTIONS preflights. Without
+  // the explicit list below, every edit/delete replay from the offline
+  // outbox dies at preflight (browser "CORS error" → OfflineError status 0
+  // → op kept forever, "Menunggu N" badge stuck with zero feedback).
+  await app.register(cors, {
+    origin: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"],
+  });
   registerAuth(app, env.jwtSecret);
   await app.register(expenseRoutes, { prisma, appTimezone });
   await app.register(budgetRoutes, { prisma, appTimezone });

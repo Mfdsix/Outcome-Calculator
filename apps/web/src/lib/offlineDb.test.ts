@@ -47,6 +47,22 @@ describe("today-cache", () => {
     expect(typeof cache!.cachedAt).toBe("number");
   });
 
+  it("round-trips snapshot with allocationType on cached expenses", async () => {
+    await saveTodayCache({
+      expenses: [
+        { id: "a", amount: 50_000, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "WEEKLY" },
+      ],
+      total: 50_000,
+      dayKey: "2026-09-19",
+      from: "2026-09-19T00:00:00+07:00",
+      to: "2026-09-20T00:00:00+07:00",
+      occurredAt: "2026-09-19T01:00:00+07:00",
+    });
+    const cache = await loadTodayCache();
+    expect(cache).not.toBeNull();
+    expect(cache!.expenses[0]!.allocationType).toBe("WEEKLY");
+  });
+
   it("returns null when nothing was cached", async () => {
     expect(await loadTodayCache()).toBeNull();
   });
@@ -80,6 +96,67 @@ describe("outbox", () => {
     await enqueueOp("tok-2", { type: "update", realId: "x", payload: { amount: 2 } });
     expect(await countOutbox(TOKEN)).toBe(1);
     expect(await countOutbox("tok-2")).toBe(1);
+  });
+
+  it("persists allocationType in the outbox payload", async () => {
+    await enqueueOp(TOKEN, {
+      type: "create",
+      tempId: "temp-a",
+      payload: { amount: 5000, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "WEEKLY" },
+    });
+    await enqueueOp(TOKEN, {
+      type: "update",
+      realId: "srv-1",
+      payload: { amount: 7000, allocationType: "MONTHLY" },
+    });
+
+    const ops = await readOutbox(TOKEN);
+    expect(ops).toHaveLength(2);
+    expect(ops[0]!.payload.allocationType).toBe("WEEKLY");
+    expect(ops[1]!.payload.allocationType).toBe("MONTHLY");
+  });
+
+  it("round-trips allocationType NONE through the outbox", async () => {
+    await enqueueOp(TOKEN, {
+      type: "create",
+      tempId: "temp-none",
+      payload: { amount: 3000, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "NONE" },
+    });
+    const ops = await readOutbox(TOKEN);
+    expect(ops[0]!.payload.allocationType).toBe("NONE");
+  });
+
+  it("update op without allocationType defaults to undefined (not persisted)", async () => {
+    await enqueueOp(TOKEN, {
+      type: "update",
+      realId: "srv-x",
+      payload: { amount: 9000 },
+    });
+    const ops = await readOutbox(TOKEN);
+    expect(ops[0]!.payload.allocationType).toBeUndefined();
+  });
+
+  it("mutateOutbox preserves allocationType when filtering", async () => {
+    await enqueueOp(TOKEN, {
+      type: "create",
+      tempId: "temp-keep",
+      payload: { amount: 5000, occurredAt: "2026-09-19T01:00:00+07:00", allocationType: "MONTHLY" },
+    });
+    await enqueueOp(TOKEN, {
+      type: "update",
+      realId: "srv-1",
+      payload: { amount: 7000, allocationType: "WEEKLY" },
+    });
+
+    // Filter out the update op; the create's allocationType should be untouched.
+    await mutateOutbox(TOKEN, (ops) => {
+      const next = ops.filter((op) => op.type === "create");
+      return { ops: next, result: next.length };
+    });
+
+    const ops = await readOutbox(TOKEN);
+    expect(ops).toHaveLength(1);
+    expect(ops[0]!.payload.allocationType).toBe("MONTHLY");
   });
 
   it("serializes concurrent read-modify-write cycles without losing ops", async () => {

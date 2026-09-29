@@ -32,12 +32,13 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "Invalid amount." });
     }
 
-    const { amount, occurredAt } = parsed.data;
+    const { amount, allocationType, occurredAt } = parsed.data;
     const row = await prisma.expense.create({
       data: {
         amount: BigInt(amount),
         occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
         userId,
+        allocationType: allocationType ?? "NONE",
       },
     });
 
@@ -64,8 +65,12 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "from must be before to." });
     }
 
+    // D/W/M totals are raw sums as-is: each expense counts once, in full,
+    // on its occurredAt day. Allocation type/distribution is stored on the
+    // row but never affects totals.
     const rangeWhere = { userId, occurredAt: { gte: from, lt: to } };
-    const [rows, aggregate] = await prisma.$transaction([
+
+    const [rows, sum] = await prisma.$transaction([
       prisma.expense.findMany({
         where: rangeWhere,
         orderBy: { occurredAt: "desc" },
@@ -76,10 +81,9 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       }),
     ]);
 
-    const expenses: ExpenseDto[] = rows.map((row) => toExpenseDto(row, appTimezone));
     const response: ExpenseListResponse = {
-      expenses,
-      total: aggregate._sum.amount === null ? 0 : Number(aggregate._sum.amount),
+      expenses: rows.map((row) => toExpenseDto(row, appTimezone)),
+      total: sum._sum.amount === null ? 0 : Number(sum._sum.amount),
     };
     return reply.send(response);
   });
@@ -92,12 +96,24 @@ export const expenseRoutes: FastifyPluginAsync<ExpenseRoutesOptions> = async (
       return reply.status(400).send({ error: "Invalid amount." });
     }
 
+    const data: { amount?: bigint; allocationType?: string } = {};
+    if (parsed.data.amount !== undefined) {
+      data.amount = BigInt(parsed.data.amount);
+    }
+    if (parsed.data.allocationType !== undefined) {
+      data.allocationType = parsed.data.allocationType;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return reply.status(400).send({ error: "Nothing to update." });
+    }
+
     try {
       // Scoped update (like DELETE below): a foreign id updates nothing —
       // never mutate first and check ownership afterwards.
       const updated = await prisma.expense.updateMany({
         where: { id, userId },
-        data: { amount: BigInt(parsed.data.amount) },
+        data,
       });
       if (updated.count === 0) {
         return reply.status(404).send({ error: "Expense not found." });

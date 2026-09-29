@@ -74,6 +74,11 @@ function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
         <span className={`col-span-1 text-right tabular-nums ${selected ? "font-semibold text-neutral-50" : "text-neutral-300"}`}>
           {row.right}
         </span>
+        {row.allocationBadge && (
+          <span className="col-span-1 text-right text-[10px] text-neutral-500">
+            {row.allocationBadge}
+          </span>
+        )}
       </button>
     </li>
   );

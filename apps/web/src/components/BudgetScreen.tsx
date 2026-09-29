@@ -6,12 +6,23 @@ import type {
   BudgetStatus,
   BudgetType,
   CreateBudgetPayload,
+  BudgetDayPoint,
   SuggestedCopyDates,
 } from "@expense-app/shared";
-import { civilToday, digitsToAmount, formatIDR, normalizeDigits, suggestCopyDates } from "@expense-app/shared";
+import {
+  buildDashboardData,
+  civilToday,
+  digitsToAmount,
+  formatIDR,
+  formatIDRAbbreviated,
+  normalizeDigits,
+  suggestCopyDates,
+} from "@expense-app/shared";
+import type { BudgetDashboardData } from "@expense-app/shared";
 
 import { BudgetProgress, periodLabelOf } from "./BudgetProgress";
 import { APP_TIMEZONE } from "../lib/periods";
+import { relativeDayLabel } from "../lib/dayLabels";
 
 export interface BudgetScreenProps {
   active: BudgetActiveResponse["budget"];
@@ -20,6 +31,9 @@ export interface BudgetScreenProps {
   onBack: () => void;
   onCreate: (payload: CreateBudgetPayload) => Promise<boolean>;
   onRemove: () => Promise<boolean>;
+  /** Day-by-day spend series from GET /api/budgets/active/series (sparse). */
+  series: BudgetDayPoint[] | null;
+  seriesLoading: boolean;
 }
 
 interface PrefillState {
@@ -48,10 +62,13 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading }: BudgetScreenProps) {
+  /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
+  const nowISO = useMemo(() => new Date().toISOString(), []);
 
   const [prefill, setPrefill] = useState<PrefillState | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<BudgetType>("daily");
   const [amountText, setAmountText] = useState("");
   const [startDate, setStartDate] = useState(todayISO);
@@ -59,6 +76,9 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  /** Show the form when: empty state (forced open), prefill active, or toggled. */
+  const showFormState = showForm || prefill !== null || active === null;
 
   /** Apply a prefill: identical type+amount, smart-shifted editable dates. */
   useEffect(() => {
@@ -81,6 +101,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
       suggested: suggestCopyDates(item, APP_TIMEZONE),
       source,
     });
+    setShowForm(true);
   };
 
   const amount = digitsToAmount(amountText);
@@ -99,11 +120,29 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
     if (ok) {
       setPrefill(null);
       setAmountText("");
+      setShowForm(false);
     }
   };
 
-  // Gray "Selesai" card + "Buat yang baru" CTA once the period is fully past.
+  /** Finished: period fully past today → gray card + "Buat yang baru". */
   const finished = active !== null && active.endDate < todayISO;
+
+  /** Dashboard data (zero-fill + deltas + pace) — derived from series. */
+  const dashboard = useMemo<BudgetDashboardData | null>(() => {
+    if (active === null || series === null) return null;
+    return buildDashboardData(
+      {
+        type: active.type,
+        amount: active.amount,
+        startDate: active.startDate,
+        endDate: active.endDate,
+        todaySpent: active.todaySpent,
+      },
+      series,
+      nowISO,
+      APP_TIMEZONE,
+    );
+  }, [active, series, nowISO]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="budget-screen">
@@ -150,6 +189,25 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
               finished={finished}
             />
+
+            {/* 3-layer dashboard (plan §3: Budget aktif fokus) */}
+            {!finished && dashboard !== null && (
+              <>
+                {/* Layer 1: Today overview */}
+                <BudgetToday
+                  type={active.type}
+                  amount={active.amount}
+                  todaySpent={active.todaySpent}
+                />
+
+                {/* Layer 2: Period position + streak */}
+                <BudgetPeriod
+                  dashboard={dashboard}
+                  periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
+                />
+              </>
+            )}
+
             <div className="flex gap-2">
               <button
                 type="button"
@@ -216,20 +274,48 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           </section>
         )}
 
-        {/* Create / replace form */}
-        <section>
-          <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
-            {prefill ? "Ganti budget — review & simpan" : "Budget baru"}
-          </h2>
-          <form
-            ref={formRef}
-            data-testid="budget-form"
-            className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
+        {/* Day History (plan §3: 14 default + expand). While the series is
+            still loading, show a quiet placeholder instead of nothing. */}
+        {!finished && dashboard !== null && dashboard.days.length > 0 && (
+          <BudgetDayHistory days={dashboard.days} maxInitial={14} />
+        )}
+        {!finished && dashboard === null && seriesLoading && active !== null && (
+          <p className="text-center text-xs text-neutral-500" data-testid="budget-series-loading">
+            Memuat riwayat harian…
+          </p>
+        )}
+
+        {/* Create / replace form — collapsed to a "Tambah" button when an active
+            (non-prefill) budget exists; expanded on toggle, prefill, or empty. */}
+        {active !== null && !showFormState ? (
+          <div>
+            <button
+              type="button"
+              data-testid="budget-form-toggle"
+              onClick={() => setShowForm(true)}
+              className="h-11 w-full rounded-lg border border-neutral-700 text-sm font-semibold text-neutral-300 active:bg-neutral-800"
+            >
+              + Tambah
+            </button>
+          </div>
+        ) : (
+          <section data-testid="budget-form-section">
+            <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
+              {prefill
+                ? "Ganti budget — review & simpan"
+                : active === null
+                  ? "Budget baru"
+                  : "Budget baru"}
+            </h2>
+            <form
+              ref={formRef}
+              data-testid="budget-form"
+              className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
             {prefill && (
               <p className="rounded-lg bg-neutral-800/60 px-2.5 py-1.5 text-xs text-neutral-400" data-testid="budget-prefill-note">
                 Dari {prefill.source === "active" ? "budget aktif" : "riwayat"}: tipe & nominal disalin,
@@ -313,8 +399,9 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
             >
               {busy ? "Menyimpan…" : "Simpan budget"}
             </button>
-          </form>
-        </section>
+            </form>
+          </section>
+        )}
       </div>
 
       {/* Soft-delete confirm: history keeps the row (plan §1 — no hard delete) */}
@@ -359,5 +446,229 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
         </div>
       )}
     </div>
+  );
+}
+
+/** Layer 1 — Today overview: headline spent vs cap + today's own progress
+ *  bar + signed delta row (daily budgets only: + tersisa / − melewati).
+ *  Full budgets show just today's total (no daily allowance to compare). */
+function BudgetToday({
+  type,
+  amount,
+  todaySpent,
+}: {
+  type: BudgetType;
+  amount: number;
+  todaySpent: number;
+}) {
+  const isDaily = type === "daily";
+  const cap = amount;
+  const todayPct = cap > 0 ? Math.round((todaySpent / cap) * 100) : 0;
+  const pct = Math.min(100, todayPct);
+  // Today status ladder (same 80% rule as the budget ladder).
+  const todayStatus = todaySpent > cap ? "over" : todaySpent * 100 >= cap * 80 ? "warning" : "ok";
+  const barColor = todayStatus === "over" ? "bg-red-500" : todayStatus === "warning" ? "bg-amber-500" : "bg-emerald-500";
+  const delta = cap - todaySpent;
+
+  return (
+    <div data-testid="budget-today" className="space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs uppercase tracking-widest text-neutral-500">
+          Hari ini
+        </span>
+        <span
+          className={`text-2xl font-light tabular-nums ${todayStatus === "over" ? "text-red-300" : "text-neutral-50"}`}
+          data-testid="budget-today-spent">
+          {formatIDR(todaySpent)}
+        </span>
+      </div>
+      <div className="text-xs tabular-nums text-neutral-500">
+        dari {formatIDR(cap)}
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label="Progres hari ini"
+      >
+        <div
+          className={`h-full rounded-full ${barColor} transition-[width] duration-500`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {isDaily && (
+        <p
+          className={`text-center text-sm font-semibold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}
+          data-testid="budget-today-delta">
+          {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
+          <span className="ml-1.5 text-xs font-normal text-neutral-500">
+            {delta >= 0 ? "tersisa hari ini" : "melewati budget"}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Layer 2 — Period position + streak: "sejak budget ini dimulai, posisi gue
+ *  sekarang gimana?" Daily shows spent vs allowance-to-date with a signed
+ *  position headline; full shows spent vs cap + remaining + pace line. */
+function BudgetPeriod({
+  dashboard,
+  periodLabel,
+}: {
+  dashboard: BudgetDashboardData;
+  periodLabel: string;
+}) {
+  const pos = dashboard.periodPosition;
+  const isDaily = dashboard.type === "daily";
+  const behind = pos.position < 0;
+
+  return (
+    <div data-testid="budget-period" className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs uppercase tracking-widest text-neutral-500">
+          Periode budget
+        </span>
+        <span className="text-xs text-neutral-400" data-testid="budget-period-allowance">
+          {periodLabel} · {isDaily ? `${formatIDR(dashboard.amount)}/hari` : "Penuh"}
+        </span>
+      </div>
+
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs tabular-nums text-neutral-500">
+          {isDaily
+            ? `${formatIDR(pos.spent)} dari ${formatIDR(pos.allowance)}`
+            : `${formatIDR(pos.spent)} dari ${formatIDR(dashboard.amount)}`}
+        </span>
+        <span
+          className={`font-semibold tabular-nums ${pos.status === "over" ? "text-red-300" : pos.status === "warning" ? "text-amber-300" : "text-emerald-300"}`}
+          data-testid="budget-period-spent">
+          {formatIDR(pos.spent)}
+        </span>
+      </div>
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-neutral-800"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.min(100, pos.progressPct)}
+        aria-label="Progres periode"
+      >
+        <div
+          className={`h-full rounded-full ${pos.status === "over" ? "bg-red-500" : pos.status === "warning" ? "bg-amber-500" : "bg-emerald-500"} transition-[width] duration-500`}
+          style={{ width: `${Math.min(100, pos.progressPct)}%` }}
+        />
+      </div>
+
+      {/* Signed position headline: the "POSISI SAAT INI" answer. */}
+      <p
+        className={`text-center text-sm font-semibold tabular-nums ${behind ? "text-red-300" : "text-emerald-300"}`}
+        data-testid="budget-period-position">
+        {behind ? `−${formatIDR(-pos.position)}` : `+${formatIDR(pos.position)}`}
+        <span className="ml-1.5 text-xs font-normal text-neutral-500">
+          {isDaily
+            ? behind
+              ? "tertinggal dari budget"
+              : "masih di bawah budget"
+            : behind
+              ? "melewati budget"
+              : "tersisa dari budget"}
+        </span>
+      </p>
+
+      {/* Full pace: spent % vs elapsed % of the period (no fake daily deltas). */}
+      {!isDaily && dashboard.totalRangeDays > 0 && (
+        <p className="text-center text-xs tabular-nums text-neutral-500" data-testid="budget-period-pace">
+          Terpakai {pos.progressPct}% · periode berjalan {Math.round((pos.elapsedDays / dashboard.totalRangeDays) * 100)}%
+        </p>
+      )}
+
+      {/* Streak nudge (daily only, ≥ 2 days) */}
+      {isDaily && pos.streak !== null && pos.streak.count >= 2 && (
+        <p
+          data-testid={`budget-period-streak-${pos.streak.under ? "under" : "over"}`}
+          className={`text-center text-xs ${pos.streak.under ? "text-emerald-300" : "text-red-300"}`}>
+          {pos.streak.under
+            ? `${pos.streak.count} hari terakhir di bawah budget`
+            : `${pos.streak.count} hari terakhir di atas budget`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Layer 3 — Day History (plan §3): 14 default rows + expand button. */
+const HISTORY_DEFAULT = 14;
+
+function BudgetDayHistory({
+  days,
+  maxInitial = HISTORY_DEFAULT,
+}: {
+  days: NonNullable<BudgetDashboardData["days"]>;
+  maxInitial?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const maxTotal = Math.max(...days.map((d) => d.total), 1);
+  // Newest first (today on top); the 14-row default keeps the latest days.
+  const ordered = useMemo(() => [...days].reverse(), [days]);
+  const visible = expanded ? ordered : ordered.slice(0, maxInitial);
+  const hasMore = days.length > maxInitial;
+
+  return (
+    <section data-testid="budget-day-history">
+      <h2 className="mb-1 px-1 text-[11px] uppercase tracking-widest text-neutral-500">
+        Riwayat harian
+      </h2>
+      <ul className="divide-y divide-neutral-800/80 rounded-xl border border-neutral-800 bg-neutral-900/50">
+        {visible.map((day) => {
+          const delta = "delta" in day ? day.delta : null;
+          const pct = (day.total / maxTotal) * 100;
+          return (
+            <li
+              key={day.date}
+              data-testid={`budget-day-row-${day.date}`}
+              className="flex items-center gap-2 px-3 py-2">
+              <span className="w-16 text-xs text-neutral-500" data-testid={`budget-day-label-${day.date}`}>
+                {relativeDayLabel(day.date, new Date())}
+              </span>
+              <span className="w-14 text-right text-xs tabular-nums text-neutral-400">
+                {day.date}
+              </span>
+              <span className="flex-1 text-right text-sm font-medium tabular-nums text-neutral-200">
+                {formatIDR(day.total)}
+              </span>
+              {delta !== null && (
+                <span
+                  className={`w-14 text-right text-xs tabular-nums ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                  data-testid={`budget-day-delta-${day.date}`}>
+                  {delta >= 0 ? `+${formatIDRAbbreviated(delta)}` : `−${formatIDRAbbreviated(-delta)}`}
+                </span>
+              )}
+              <span className="w-10" aria-label={`mini bar ${pct}%`}>
+                <div
+                  className="h-1.5 w-full rounded-full bg-neutral-800">
+                  <div
+                    className="h-full rounded-full bg-neutral-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {hasMore && !expanded && (
+        <button
+          type="button"
+          data-testid="budget-history-more"
+          onClick={() => setExpanded(true)}
+          className="mt-1 w-full text-center text-xs font-semibold text-neutral-300 active:text-neutral-100">
+          Tampilkan {days.length - maxInitial} hari lainnya
+        </button>
+      )}
+    </section>
   );
 }

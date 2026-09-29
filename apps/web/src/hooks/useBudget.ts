@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { BudgetActiveResponse, BudgetHistoryItem } from "@expense-app/shared";
+import type { BudgetActiveResponse, BudgetHistoryItem, BudgetDayPoint } from "@expense-app/shared";
 
 import { budgetsApi } from "../lib/api";
 
@@ -9,10 +9,13 @@ export interface BudgetState {
   active: BudgetActiveResponse["budget"];
   /** Past (deactivated) budgets, desc by createdAt. */
   history: BudgetHistoryItem[];
+  /** Day-by-day spend series for the active budget (sparse), or null. */
+  series: BudgetDayPoint[] | null;
+  seriesLoading: boolean;
   loading: boolean;
   /** Soft error — never blocks the keypad (plan §4); shown via banner. */
   error: string | null;
-  /** Fetch active + history (2 parallel requests — plan §4). */
+  /** Fetch active + history + series (plan §4). */
   refresh: () => void;
   createBudget: (payload: {
     type: "full" | "daily";
@@ -32,6 +35,8 @@ export interface BudgetState {
 export function useBudget(): BudgetState {
   const [active, setActive] = useState<BudgetActiveResponse["budget"]>(null);
   const [history, setHistory] = useState<BudgetHistoryItem[]>([]);
+  const [series, setSeries] = useState<BudgetDayPoint[] | null>(null);
+  const [seriesLoading, setSeriesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,17 +50,31 @@ export function useBudget(): BudgetState {
 
     const reloadId = ++reloadIdRef.current;
     setLoading(true);
+    setSeriesLoading(true);
 
-    // Two parallel requests (plan §4: simple over clever).
-    Promise.all([budgetsApi.getActive(), budgetsApi.history()])
-      .then(([activeResponse, historyResponse]) => {
+    // The day series is best-effort: it must never fail the whole refresh
+    // (offline, older mocks, or endpoint drift → null → dashboard hidden).
+    // Wrapped in Promise.resolve().then so even a synchronous throw degrades
+    // to null instead of crashing the refresh.
+    const seriesPromise: Promise<BudgetDayPoint[] | null> = Promise.resolve()
+      .then(() => budgetsApi.activeSeries())
+      .then((response) => response.days)
+      .catch(() => null);
+
+    // Three parallel requests (plan §4: simple over clever).
+    Promise.all([budgetsApi.getActive(), budgetsApi.history(), seriesPromise])
+      .then(([activeResponse, historyResponse, seriesResponse]) => {
         if (reloadIdRef.current !== reloadId) return;
         setActive(activeResponse.budget);
         setHistory(historyResponse.history);
+        setSeries(seriesResponse);
+        setSeriesLoading(false);
         setError(null);
       })
       .catch((cause: unknown) => {
         if (reloadIdRef.current !== reloadId) return;
+        setSeries(null);
+        setSeriesLoading(false);
         setError(cause instanceof Error ? cause.message : "Gagal memuat budget.");
       })
       .finally(() => {
@@ -110,5 +129,5 @@ export function useBudget(): BudgetState {
     [],
   );
 
-  return { active, history, loading, error, refresh, createBudget, removeBudget, getStatusNow };
+  return { active, history, series, seriesLoading, loading, error, refresh, createBudget, removeBudget, getStatusNow };
 }
