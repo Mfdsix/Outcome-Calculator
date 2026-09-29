@@ -163,7 +163,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
     <>
       <div className="flex min-h-0 flex-1 flex-col" data-testid="budget-screen">
       {/* Sticky top bar: ← Budget ... [ + Tambah ] (mock §A — Tambah always visible) */}
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-900/80 pb-2 backdrop-blur-sm">
+      <div className="flex items-center justify-between pb-2">
         <button
           type="button"
           aria-label="Kembali ke kalkulator"
@@ -173,12 +173,12 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
         >
           ←
         </button>
-        <h1 className="text-base font-semibold text-neutral-100">Budget</h1>
+        <span className="text-base font-semibold text-neutral-100">Budget</span>
         <button
           type="button"
           data-testid="budget-form-toggle"
           onClick={openNewBudget}
-          className="flex items-center gap-1.5 rounded-full border border-neutral-800/10 bg-white px-3.5 py-1.5 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-neutral-200 active:bg-neutral-300"
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_2px_0_0_#065f46] active:shadow-none"
         >
           + Tambah
         </button>
