@@ -169,6 +169,24 @@ describe("App — budget delta in graph (no toggle)", () => {
     expect(screen.getByTestId("chart-budget-delta")).toBeInTheDocument();
   });
 
+  it("chart toggles bars ↔ line in special mode, delta persists", async () => {
+    seedExpenses([{ id: "e1", amount: 50_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+
+    await screen.findByTestId("bar-chart");
+    expect(screen.getByTestId("chart-budget-delta")).toHaveTextContent("+Rp50.000");
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.getByTestId("spending-line")).toBeInTheDocument();
+    expect(screen.getByTestId("chart-budget-delta")).toHaveTextContent("+Rp50.000");
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.queryByTestId("spending-line")).not.toBeInTheDocument();
+    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
+  });
+
   it("allocation seam: WEEKLY 700k contributes 100k/day (deferred to allocation branch)", () => {
     // TODO: when allocation engine lands, this test should verify that a
     // WEEKLY expense of 700k contributes 100k/day to the daily snapshot.

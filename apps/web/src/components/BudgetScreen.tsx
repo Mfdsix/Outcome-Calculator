@@ -22,8 +22,10 @@ import {
 import type { BudgetDashboardData } from "@expense-app/shared";
 
 import { BudgetModal } from "./BudgetModal";
-import { BudgetPeriodChart } from "./BudgetPeriodChart";
+import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodChart";
 import { periodLabelOf } from "./BudgetProgress";
+import { ChartModeToggle } from "./ChartModeToggle";
+import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
 import { relativeDayLabel } from "../lib/dayLabels";
 
@@ -214,6 +216,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
 
                 {/* Layer 2: Period card */}
                 <BudgetPeriod
+                  key={active.id}
                   dashboard={dashboard}
                   onEdit={() => useAgain("active", active)}
                   onHapus={() => setConfirmRemove(true)}
@@ -482,8 +485,8 @@ function BudgetToday({
   );
 }
 
-/** Layer 2 — Period card: edit|hapus (top-right), big signed position
- *  headline + elapsed/total day counter, diverging bar chart. */
+/** Layer 2 — Period card: Kelola | edit|hapus, big signed position
+ *  headline + elapsed/total day counter + chart toggle, bar/line chart. */
 function BudgetPeriod({
   dashboard,
   onEdit,
@@ -497,6 +500,12 @@ function BudgetPeriod({
 }) {
   const pos = dashboard.periodPosition;
   const behind = pos.position < 0;
+  // Persisted bar ↔ line preference; first visit defaults to the auto mode
+  // (line for long periods). Keyed by budgetId via the parent remount.
+  const [chartMode, toggleChartMode] = useChartMode(
+    "expense-app.budget-chart-mode",
+    dashboard.days.length >= PERIOD_CHART_LINE_MIN_DAYS ? "line" : "bar",
+  );
 
   return (
     <div data-testid="budget-period" className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
@@ -535,15 +544,18 @@ function BudgetPeriod({
           data-testid="budget-period-position">
           {behind ? `−${formatIDR(-pos.position)}` : `+${formatIDR(pos.position)}`}
         </p>
-        <span
-          className="shrink-0 text-xs tabular-nums text-neutral-500"
-          data-testid="budget-period-days">
-          {pos.elapsedDays}/{dashboard.totalRangeDays} Hari
+        <span className="flex shrink-0 items-center gap-2">
+          <span
+            className="text-xs tabular-nums text-neutral-500"
+            data-testid="budget-period-days">
+            {pos.elapsedDays}/{dashboard.totalRangeDays} Hari
+          </span>
+          <ChartModeToggle mode={chartMode} onToggle={toggleChartMode} testid="budget-chart-toggle" />
         </span>
       </div>
 
-      {/* Diverging bar chart — daily: cap−total per day; full: single-direction total */}
-      <BudgetPeriodChart days={dashboard.days} type={dashboard.type} />
+      {/* Diverging bar/line chart — daily: cap−total per day; full: single-direction total */}
+      <BudgetPeriodChart days={dashboard.days} type={dashboard.type} forceMode={chartMode} />
       {/* Screen-reader progress (chart is role="img"; keep a real progressbar for AT). */}
       <div
         className="sr-only"

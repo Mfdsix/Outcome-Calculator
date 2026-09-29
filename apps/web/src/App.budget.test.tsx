@@ -760,6 +760,45 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     expect(screen.getAllByTestId(/^budget-period-bar-\d{4}-\d{2}-\d{2}$/)).toHaveLength(4);
   });
 
+  it("budget card chart toggles bars ↔ line and persists the choice", async () => {
+    getActiveMock.mockResolvedValue(
+      activeBudget({
+        type: "daily",
+        amount: 85_000,
+        startDate: "2026-09-25",
+        endDate: "2026-10-25",
+        todaySpent: 47_000,
+        spent: 467_209,
+        remaining: -127_209,
+        progressPct: 137,
+        status: "ok",
+      }),
+    );
+    seriesMock.mockResolvedValue({
+      days: [
+        { date: "2026-09-25", total: 76_785 },
+        { date: "2026-09-26", total: 153_405 },
+        { date: "2026-09-27", total: 190_019 },
+        { date: "2026-09-28", total: 47_000 },
+      ],
+    });
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+
+    // 4 days → bars by default.
+    await screen.findByTestId("budget-period-chart");
+    expect(screen.getByTestId("budget-period-bar-2026-09-25")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("budget-chart-toggle"));
+    expect(screen.getByTestId("budget-period-line")).toBeInTheDocument();
+    expect(localStorage.getItem("expense-app.budget-chart-mode")).toBe("line");
+
+    await user.click(screen.getByTestId("budget-chart-toggle"));
+    expect(screen.getByTestId("budget-period-bar-2026-09-25")).toBeInTheDocument();
+    expect(localStorage.getItem("expense-app.budget-chart-mode")).toBe("bar");
+  });
+
   it(">= 14 days auto-transforms bars into an up-down line chart", async () => {
     const days = Array.from({ length: 16 }, (_, i) => {
       const day = String(13 + i).padStart(2, "0");

@@ -123,6 +123,28 @@ describe("GraphSection", () => {
     expect(overFill).toHaveClass("bg-red-500/30");
   });
 
+  it("toggles bars ↔ line and persists the choice", async () => {
+    localStorage.clear();
+    const user = userEvent.setup();
+    const { unmount } = render(<GraphSection buckets={mockBuckets} snapshot={mockUnder} />);
+
+    expect(screen.getByTestId("bar-2026-09-25T08")).toBeInTheDocument();
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.getByTestId("spending-line")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-2026-09-25T08")).not.toBeInTheDocument();
+    expect(localStorage.getItem("expense-app.chart-mode")).toBe("line");
+
+    // Remount reads the persisted choice.
+    unmount();
+    render(<GraphSection buckets={mockBuckets} snapshot={mockUnder} />);
+    expect(screen.getByTestId("spending-line")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.getByTestId("bar-2026-09-25T08")).toBeInTheDocument();
+    expect(localStorage.getItem("expense-app.chart-mode")).toBe("bar");
+    localStorage.clear();
+  });
+
   it("passes selectedKey/onSelect through to BarChart", async () => {
     const onSelect = vi.fn();
     const user = userEvent.setup();

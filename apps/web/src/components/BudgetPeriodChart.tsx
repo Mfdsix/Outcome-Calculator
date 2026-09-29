@@ -5,6 +5,8 @@ import { formatIDR } from "../lib/currency";
 export interface BudgetPeriodChartProps {
   days: BudgetSeriesDay[];
   type: BudgetType;
+  /** Explicit override from the persisted toggle; absent = auto by day count. */
+  forceMode?: "bar" | "line";
 }
 
 /** At/above this many days the bars auto-transform into an up-down line chart. */
@@ -40,7 +42,7 @@ function ChartFooter({ first }: { first: string }) {
  * per-segment emerald/red coloring) so long periods stay readable without
  * horizontal scrolling.
  */
-export function BudgetPeriodChart({ days, type }: BudgetPeriodChartProps) {
+export function BudgetPeriodChart({ days, type, forceMode }: BudgetPeriodChartProps) {
   if (days.length === 0) {
     return null;
   }
@@ -49,7 +51,7 @@ export function BudgetPeriodChart({ days, type }: BudgetPeriodChartProps) {
 
   if (isDaily) {
     const deltas = days as Array<{ date: string; total: number; delta: number }>;
-    if (deltas.length >= PERIOD_CHART_LINE_MIN_DAYS) {
+    if (forceMode ? forceMode === "line" : deltas.length >= PERIOD_CHART_LINE_MIN_DAYS) {
       return <DailyLineChart deltas={deltas} />;
     }
     const maxAbs = Math.max(...deltas.map((d) => Math.abs(d.delta)), 1);
@@ -109,7 +111,7 @@ export function BudgetPeriodChart({ days, type }: BudgetPeriodChartProps) {
   }
 
   const totals = days.map((d) => d.total);
-  if (totals.length >= PERIOD_CHART_LINE_MIN_DAYS) {
+  if (forceMode ? forceMode === "line" : totals.length >= PERIOD_CHART_LINE_MIN_DAYS) {
     return <FullLineChart days={days} maxTotal={Math.max(...totals, 1)} />;
   }
   const maxTotal = Math.max(...totals, 1);
@@ -194,7 +196,7 @@ function DailyLineChart({ deltas }: { deltas: Array<{ date: string; total: numbe
             key={day.date}
             cx={x(i)}
             cy={y(day.delta)}
-            r="1.4"
+            r="0.8"
             data-testid={`budget-period-point-${day.date}`}
             className={day.delta >= 0 ? "fill-emerald-400" : "fill-red-400"}
           >
@@ -243,7 +245,7 @@ function FullLineChart({ days, maxTotal }: { days: BudgetSeriesDay[]; maxTotal: 
           );
         })}
         {days.map((day, i) => (
-          <circle key={day.date} cx={x(i)} cy={y(day.total)} r="1.4" data-testid={`budget-period-point-${day.date}`} className="fill-emerald-400">
+          <circle key={day.date} cx={x(i)} cy={y(day.total)} r="0.8" data-testid={`budget-period-point-${day.date}`} className="fill-emerald-400">
             <title>{`${day.date}: ${formatIDR(day.total)}`}</title>
           </circle>
         ))}
