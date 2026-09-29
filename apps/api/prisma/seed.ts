@@ -17,6 +17,11 @@ const scrypt = promisify(scryptCallback) as (
  * ending today, owned by the PIN identity from SEED_PIN (dev-only). Never run
  * against production. When SEED_PIN is unset the seed is skipped with a hint
  * so CI and prod never accidentally create a well-known identity.
+ *
+ * On each run the seed WIPES the SEED_PIN user's budgets + expenses then
+ * reseeds everything: expenses generator is deterministic (stable per run date),
+ * budgets are created fresh — two history rows (inactive) + one active daily
+ * budget whose amount is tunable via SEED_BUDGET_DAILY (default 85_000).
  */
 
 const TZ = process.env.APP_TIMEZONE ?? "Asia/Jakarta";
@@ -68,6 +73,11 @@ async function findOrCreateUser(pin: string) {
   return prisma.user.create({ data: { pinLookup: lookup, pinHash } });
 }
 
+/** Civil date → UTC midnight Date, matching the route's `new Date(Date.UTC(y, m-1, d))` pattern. */
+function civilDateToUtcMidnight(civil: { year: number; month: number; day: number }): Date {
+  return new Date(Date.UTC(civil.year, civil.month - 1, civil.day));
+}
+
 async function main(): Promise<void> {
   const pin = normalizePin(process.env.SEED_PIN ?? "");
   if (!pin) {
@@ -80,11 +90,10 @@ async function main(): Promise<void> {
   }
 
   const user = await findOrCreateUser(pin);
-  const existing = await prisma.expense.count({ where: { userId: user.id } });
-  if (existing > 0) {
-    console.log(`Seed skipped: ${existing} expense(s) already exist for SEED_PIN user.`);
-    return;
-  }
+
+  // --- Wipe scoped to the SEED_PIN user's own rows (never unbounded) ---
+  await prisma.budget.deleteMany({ where: { userId: user.id } });
+  await prisma.expense.deleteMany({ where: { userId: user.id } });
 
   const now = new Date();
   const today = getZonedParts(now, TZ);
@@ -132,6 +141,54 @@ async function main(): Promise<void> {
 
   await prisma.expense.createMany({ data: rows });
   console.log(`Seeded ${rows.length} expenses over ${DAYS} days for SEED_PIN user ${user.id}.`);
+
+  // --- Budgets ---
+  // Spent is NOT stored — computed live from expenses inside each range.
+  // Three rows, all owned by the same SEED_PIN user:
+  //   H1: history (old)  — daily 75k, range [60 → 31] days ago, inactive
+  //   H2: history (new)  — daily 80k, range [30 → 18] days ago, inactive
+  //   A:  active          — daily 85k (or SEED_BUDGET_DAILY), [8 days ago → +30 days], active
+  // createdAt is set explicitly so H1 < H2 < A for deterministic history ordering.
+  const dailyBudget = Number(process.env.SEED_BUDGET_DAILY ?? "85000");
+
+  const h1Start = addCivilDays(today, -60);
+  const h1End = addCivilDays(today, -31);
+  const h2Start = addCivilDays(today, -30);
+  const h2End = addCivilDays(today, -18);
+  const aStart = addCivilDays(today, -8);
+  const aEnd = addCivilDays(today, 30);
+
+  const budgets = [
+    {
+      type: "daily" as const,
+      amount: BigInt(75_000),
+      startDate: civilDateToUtcMidnight(h1Start),
+      endDate: civilDateToUtcMidnight(h1End),
+      isActive: false,
+      createdAt: new Date(Date.UTC(2025, 0, 1, 0, 0, 0)), // earliest
+    },
+    {
+      type: "daily" as const,
+      amount: BigInt(80_000),
+      startDate: civilDateToUtcMidnight(h2Start),
+      endDate: civilDateToUtcMidnight(h2End),
+      isActive: false,
+      createdAt: new Date(Date.UTC(2025, 1, 1, 0, 0, 0)), // middle
+    },
+    {
+      type: "daily" as const,
+      amount: BigInt(dailyBudget),
+      startDate: civilDateToUtcMidnight(aStart),
+      endDate: civilDateToUtcMidnight(aEnd),
+      isActive: true,
+      createdAt: new Date(Date.UTC(2025, 2, 1, 0, 0, 0)), // latest → active on top
+    },
+  ];
+
+  for (const b of budgets) {
+    await prisma.budget.create({ data: { ...b, userId: user.id } });
+  }
+  console.log(`Seeded ${budgets.length} budgets (${budgets.filter((b) => b.isActive).length} active) for SEED_PIN user ${user.id}.`);
 }
 
 main()

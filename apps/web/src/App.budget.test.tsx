@@ -177,7 +177,7 @@ describe("App — budget entry + calculator hygiene", () => {
 });
 
 describe("App — budget screen: active card + history", () => {
-   it("renders the period card with position + chart + period label", async () => {
+   it("renders the period card with position + day counter + chart + edit|hapus", async () => {
     vi.setSystemTime(new Date("2026-09-28T12:00:00+07:00"));
     getActiveMock.mockResolvedValue(
       activeBudget({ type: "full", amount: 10_000_000, startDate: "2026-09-01", endDate: "2026-09-30", spent: 3_600_000, remaining: 6_400_000, progressPct: 36 }),
@@ -194,13 +194,17 @@ describe("App — budget screen: active card + history", () => {
     await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-period");
-    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("tersisa dari budget");
-    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("+Rp");
+    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("+Rp3.400.000");
+    expect(screen.getByTestId("budget-period-days")).toHaveTextContent("28/30 Hari");
     expect(screen.getByTestId("budget-period-chart")).toBeInTheDocument();
-    // Kelola budget opens the modal with Ganti + Hapus.
+    // Edit + Hapus live on the card itself.
+    expect(screen.getByTestId("budget-active-ganti")).toHaveTextContent("Edit");
+    expect(screen.getByTestId("budget-active-hapus")).toHaveTextContent("Hapus");
+    // Kelola modal only carries history now.
     await user.click(screen.getByTestId("budget-kelola-toggle"));
-    expect(await screen.findByTestId("budget-kelola-ganti")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-kelola-hapus")).toBeInTheDocument();
+    expect(await screen.findByTestId("budget-modal-overlay")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-kelola-ganti")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-kelola-hapus")).not.toBeInTheDocument();
     vi.useRealTimers();
    });
 
@@ -291,7 +295,7 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
    });
 
-   it("'Ganti' pada active budget via Kelola modal prefills from the active budget itself", async () => {
+   it("'Edit' pada kartu budget prefills the form modal from the active budget", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
@@ -299,9 +303,8 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     await user.click(screen.getByTestId("user-menu-budget"));
 
     await screen.findByTestId("budget-period");
-    // Buka modal kelola → Ganti → form modal dengan prefill.
-    await user.click(screen.getByTestId("budget-kelola-toggle"));
-    await user.click(await screen.findByTestId("budget-kelola-ganti"));
+    // Edit langsung pada kartu → form modal dengan prefill.
+    await user.click(screen.getByTestId("budget-active-ganti"));
 
     expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
     expect(screen.getByTestId("budget-type-daily")).toHaveAttribute("aria-pressed", "true");
@@ -429,7 +432,7 @@ describe("App — create + remove budget", () => {
     expect(await screen.findByTestId("keypad")).toBeInTheDocument();
    });
 
-   it("Hapus asks for confirmation via Kelola modal, then deactivates (budget disappears)", async () => {
+   it("Hapus on the card asks for confirmation, then deactivates (budget disappears)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     seriesMock.mockResolvedValue({ days: [] });
     removeBudgetMock.mockImplementation(async () => {
@@ -440,9 +443,8 @@ describe("App — create + remove budget", () => {
     await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-period");
 
-    // Hapus via Kelola modal.
-    await user.click(screen.getByTestId("budget-kelola-toggle"));
-    await user.click(screen.getByTestId("budget-kelola-hapus"));
+    // Hapus langsung pada kartu.
+    await user.click(screen.getByTestId("budget-active-hapus"));
     expect(screen.getByTestId("budget-delete-dialog")).toBeInTheDocument();
     expect(removeBudgetMock).not.toHaveBeenCalled();
 
@@ -459,8 +461,7 @@ describe("App — create + remove budget", () => {
     await user.click(screen.getByTestId("user-menu-budget"));
     await screen.findByTestId("budget-period");
 
-    await user.click(screen.getByTestId("budget-kelola-toggle"));
-    await user.click(screen.getByTestId("budget-kelola-hapus"));
+    await user.click(screen.getByTestId("budget-active-hapus"));
     await user.click(screen.getByTestId("budget-delete-cancel"));
 
     expect(removeBudgetMock).not.toHaveBeenCalled();
@@ -538,20 +539,17 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
-    // Layer 1: today.
+    // Layer 1: today — chip + signed delta headline + pct.
     expect(await screen.findByTestId("budget-today")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-today-spent")).toHaveTextContent("Rp47.000");
+    expect(screen.getByTestId("budget-today-status")).toHaveTextContent("Aman");
     expect(screen.getByTestId("budget-today-delta")).toHaveTextContent("+Rp38.000");
-    expect(screen.getByTestId("budget-today-delta")).toHaveTextContent("tersisa hari ini");
+    expect(screen.getByTestId("budget-today-pct")).toHaveTextContent("55%");
 
-    // Layer 2: period position behind.
+    // Layer 2: period position behind + day counter.
     expect(screen.getByTestId("budget-period")).toBeInTheDocument();
     expect(screen.getByTestId("budget-period-position")).toHaveTextContent("−Rp127.209");
-    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("tertinggal dari budget");
+    expect(screen.getByTestId("budget-period-days")).toHaveTextContent("4/31 Hari");
     expect(screen.getByTestId("budget-period-chart")).toBeInTheDocument();
-    // Only 1 under day at the run end (today) → no streak line.
-    expect(screen.queryByTestId("budget-period-streak-over")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("budget-period-streak-under")).not.toBeInTheDocument();
 
     // Layer 3: history newest-first with signed deltas.
     expect(screen.getByTestId("budget-day-history")).toBeInTheDocument();
@@ -568,7 +566,7 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     expect(screen.getByTestId("budget-day-delta-2026-09-25")).toHaveTextContent("+Rp8.215");
   });
 
-  it("daily over today → −Rp melewati budget", async () => {
+  it("daily over today → status chip over + −Rp headline", async () => {
     getActiveMock.mockResolvedValue(
       activeBudget({
         type: "daily",
@@ -588,10 +586,11 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     await user.click(screen.getByTestId("user-menu-budget"));
 
     expect(await screen.findByTestId("budget-today-delta")).toHaveTextContent("−Rp35.000");
-    expect(screen.getByTestId("budget-today-delta")).toHaveTextContent("melewati budget");
+    expect(screen.getByTestId("budget-today-status")).toHaveTextContent("Lewat batas");
+    expect(screen.getByTestId("budget-today-pct")).toHaveTextContent("141%");
   });
 
-  it("two over days in a row → streak line (≥ 2 hari)", async () => {
+  it("period card shows elapsed/total day counter", async () => {
     getActiveMock.mockResolvedValue(
       activeBudget({
         type: "daily",
@@ -610,19 +609,18 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
         { date: "2026-09-25", total: 76_785 }, // under
         { date: "2026-09-26", total: 153_405 }, // over
         { date: "2026-09-27", total: 190_019 }, // over
-        { date: "2026-09-28", total: 190_019 }, // over today → streak 3 over
+        { date: "2026-09-28", total: 190_019 }, // over today
       ],
     });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
-    expect(await screen.findByTestId("budget-period-streak-over")).toHaveTextContent(
-      "3 hari terakhir di atas budget",
-    );
+    // Sep 25–28 elapsed 4 of 31 total days (Sep 25 – Oct 25).
+    expect(await screen.findByTestId("budget-period-days")).toHaveTextContent("4/31 Hari");
   });
 
-  it("full budget → no daily deltas, pace line instead", async () => {
+  it("full budget → chip from overall status, no daily deltas, no pace line", async () => {
     getActiveMock.mockResolvedValue(
       activeBudget({
         type: "full",
@@ -648,14 +646,15 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
-    // Today shows the total with no +/- fiction.
+    // Today shows the total with the overall-status chip, no +/- fiction.
     expect(await screen.findByTestId("budget-today-spent")).toHaveTextContent("Rp47.000");
+    expect(screen.getByTestId("budget-today-status")).toHaveTextContent("Aman");
+    expect(screen.getByTestId("budget-today-pct")).toHaveTextContent("2%");
     expect(screen.queryByTestId("budget-today-delta")).not.toBeInTheDocument();
-    // Period: spent + remaining position + pace (elapsed 4 of 31 days ≈ 13%).
+    // Period: signed position + day counter, no pace line.
     expect(screen.getByTestId("budget-period-position")).toHaveTextContent("+Rp2.532.791");
-    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("tersisa dari budget");
-    expect(screen.getByTestId("budget-period-pace")).toHaveTextContent("Terpakai 16%");
-    expect(screen.getByTestId("budget-period-pace")).toHaveTextContent("periode berjalan 13%");
+    expect(screen.getByTestId("budget-period-days")).toHaveTextContent("4/31 Hari");
+    expect(screen.queryByTestId("budget-period-pace")).not.toBeInTheDocument();
     // History rows carry no delta cells.
     expect(screen.getByTestId("budget-day-row-2026-09-28")).toBeInTheDocument();
     expect(screen.queryByTestId("budget-day-delta-2026-09-28")).not.toBeInTheDocument();
@@ -706,9 +705,8 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     // Form is collapsed initially.
     expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
 
-    // Ganti via "Kelola budget" modal → prefill → form modal muncul.
-    await user.click(screen.getByTestId("budget-kelola-toggle"));
-    await user.click(await screen.findByTestId("budget-kelola-ganti"));
+    // Edit pada kartu → prefill → form modal muncul.
+    await user.click(screen.getByTestId("budget-active-ganti"));
     expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
     expect(screen.getByTestId("budget-form")).toBeInTheDocument();
   });

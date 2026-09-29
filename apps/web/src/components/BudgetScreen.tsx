@@ -184,7 +184,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-2">
+      <div className="shrink-0 space-y-4">
         {/* Active card / empty state */}
         {loading && active === null ? (
           <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-6 text-center text-sm text-neutral-500">
@@ -204,18 +204,19 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           <>
             {!finished && dashboard !== null && (
               <>
-                {/* Layer 1: Today overview (mock §B) */}
+                {/* Layer 1: Today overview */}
                 <BudgetToday
                   type={active.type}
                   amount={active.amount}
                   todaySpent={active.todaySpent}
+                  status={active.status}
                 />
 
-                {/* Layer 2: Period position + streak (mock §C) */}
+                {/* Layer 2: Period card */}
                 <BudgetPeriod
                   dashboard={dashboard}
-                  periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
-                  startDate={active.startDate}
+                  onEdit={() => useAgain("active", active)}
+                  onHapus={() => setConfirmRemove(true)}
                 />
               </>
             )}
@@ -235,6 +236,10 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           </>
         )}
  
+      </div>
+
+      {/* Day history fills the remaining height and scrolls internally. */}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
         {/* Day History (plan §3: 14 default + expand). While the series is
             still loading, show a quiet placeholder instead of nothing. */}
         {!finished && dashboard !== null && dashboard.days.length > 0 && (
@@ -246,18 +251,19 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           </p>
         )}
 
-        {/* Kelola budget button (only when active exists; plan §3) */}
-        {!loading && active !== null && (
-          <button
-            type="button"
-            data-testid="budget-kelola-toggle"
-            onClick={() => setModalMode("kelola")}
-            className="w-full text-center text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
-          >
-            Kelola budget
-          </button>
-        )}
       </div>
+
+      {/* Kelola budget button (only when active exists; plan §3) */}
+      {!loading && active !== null && (
+        <button
+          type="button"
+          data-testid="budget-kelola-toggle"
+          onClick={() => setModalMode("kelola")}
+          className="w-full shrink-0 pt-1 text-center text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
+        >
+          Kelola budget
+        </button>
+      )}
 
       {/* Confirmation dialog — rendered in the main div (below scroll), reused for remove */}
       {confirmRemove && (
@@ -328,15 +334,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
             ) : (
               <BudgetKelolaModal
                 history={history}
-                active={active}
                 onUseAgain={useAgain}
-                onGanti={() => {
-                  if (active) useAgain("active", active);
-                }}
-                onHapus={() => {
-                  closeModal();
-                  setConfirmRemove(true);
-                }}
               />
             )}
           </BudgetModal>,
@@ -409,17 +407,20 @@ function BudgetFinished({
   );
 }
 
-/** Layer 1 — Today overview: headline spent vs cap + today's own progress
- *  bar + signed delta row (daily budgets only: + tersisa / − melewati).
- *  Full budgets show just today's total (no daily allowance to compare). */
+/** Layer 1 — Today overview: label + status chip, big signed delta
+ *  headline (daily: + tersisa / − melewati; full: today's total), progress
+ *  bar, and right-aligned percentage. */
 function BudgetToday({
   type,
   amount,
   todaySpent,
+  status,
 }: {
   type: BudgetType;
   amount: number;
   todaySpent: number;
+  /** Overall budget status — chip source for full budgets (no daily cap). */
+  status: BudgetStatus;
 }) {
   const isDaily = type === "daily";
   const cap = amount;
@@ -427,7 +428,9 @@ function BudgetToday({
   const pct = Math.min(100, todayPct);
   // Today status ladder (same 80% rule as the budget ladder).
   const todayStatus = todaySpent > cap ? "over" : todaySpent * 100 >= cap * 80 ? "warning" : "ok";
-  const barColor = todayStatus === "over" ? "bg-red-500" : todayStatus === "warning" ? "bg-amber-500" : "bg-emerald-500";
+  const chipStatus = isDaily ? todayStatus : status;
+  const chip = STATUS_CHIP[chipStatus];
+  const barColor = chipStatus === "over" ? "bg-red-500" : chipStatus === "warning" ? "bg-amber-500" : "bg-emerald-500";
   const delta = cap - todaySpent;
 
   return (
@@ -436,21 +439,29 @@ function BudgetToday({
       className="relative overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"
     >
       <div className="pointer-events-none absolute -mr-10 -mt-10 right-0 top-0 h-24 w-24 rounded-full bg-emerald-500/5 blur-2xl" />
-      {/* Mock §B: label on its own row, headline + /cap on baseline */}
-      <div className="flex items-end justify-between">
+      <div className="flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-widest text-neutral-500">
-          HARI INI
+          Hari ini
         </span>
-        <div className="flex items-baseline gap-1">
-          <span
-            className={`text-3xl font-bold tabular-nums ${todayStatus === "over" ? "text-red-300" : "text-neutral-100"}`}
-            data-testid="budget-today-spent">
-            {formatIDR(todaySpent)}
-          </span>
-          <span className="text-sm text-neutral-500">/</span>
-          <span className="text-sm text-neutral-500 tabular-nums">{formatIDR(cap)}</span>
-        </div>
+        <span
+          data-testid="budget-today-status"
+          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${chip.className}`}>
+          {chip.label}
+        </span>
       </div>
+      {isDaily ? (
+        <p
+          data-testid="budget-today-delta"
+          className={`mt-1 text-3xl font-bold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+          {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
+        </p>
+      ) : (
+        <p
+          data-testid="budget-today-spent"
+          className="mt-1 text-3xl font-bold tabular-nums text-neutral-100">
+          {formatIDR(todaySpent)}
+        </p>
+      )}
       <div
         className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-800"
         role="progressbar"
@@ -464,65 +475,64 @@ function BudgetToday({
           style={{ width: `${pct}%` }}
         />
       </div>
-      {isDaily && (
-        <p
-          className={`mt-2 flex items-center justify-center gap-1 text-center text-sm font-semibold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}
-          data-testid="budget-today-delta">
-          {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
-          <span className="text-xs font-normal text-neutral-500">
-            {delta >= 0 ? "tersisa hari ini" : "melewati budget"}
-          </span>
-        </p>
-      )}
+      <p
+        data-testid="budget-today-pct"
+        className="mt-1.5 text-right text-xs tabular-nums text-neutral-500">
+        {todayPct}%
+      </p>
     </div>
   );
 }
 
-/** Layer 2 — Period position + streak: "sejak budget ini dimulai, posisi gue
- *  sekarang gimana?" Daily shows spent vs allowance-to-date with a signed
- *  position headline; full shows spent vs cap + remaining + pace line. */
+/** Layer 2 — Period card: edit|hapus (top-right), big signed position
+ *  headline + elapsed/total day counter, diverging bar chart. */
 function BudgetPeriod({
   dashboard,
-  periodLabel,
-  startDate,
+  onEdit,
+  onHapus,
 }: {
   dashboard: BudgetDashboardData;
-  periodLabel: string;
-  startDate: string;
+  onEdit: () => void;
+  onHapus: () => void;
 }) {
   const pos = dashboard.periodPosition;
-  const isDaily = dashboard.type === "daily";
   const behind = pos.position < 0;
 
   return (
-    <div data-testid="budget-period" className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 mb-6">
-      {/* Mock §C: heading + headline position (remove extra allowance/spent rows) */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-widest text-neutral-500">
-          Status Periode Ini
-        </span>
-        <span className="text-xs tabular-nums text-neutral-400">
-          {periodLabel}
+    <div data-testid="budget-period" className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          data-testid="budget-active-ganti"
+          onClick={onEdit}
+          className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-200 active:bg-neutral-800"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          data-testid="budget-active-hapus"
+          onClick={onHapus}
+          className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs font-semibold text-red-300 active:bg-neutral-800"
+        >
+          Hapus
+        </button>
+      </div>
+
+      <div className="mt-1 flex items-baseline justify-between gap-2">
+        <p
+          className={`text-2xl font-bold tabular-nums ${behind ? "text-red-300" : "text-emerald-300"}`}
+          data-testid="budget-period-position">
+          {behind ? `−${formatIDR(-pos.position)}` : `+${formatIDR(pos.position)}`}
+        </p>
+        <span
+          className="shrink-0 text-xs tabular-nums text-neutral-500"
+          data-testid="budget-period-days">
+          {pos.elapsedDays}/{dashboard.totalRangeDays} Hari
         </span>
       </div>
 
-      {/* Signed position headline: the "POSISI SAAT INI" answer. */}
-      <p
-        className={`mt-2 text-center text-2xl font-bold tabular-nums ${behind ? "text-red-300" : "text-emerald-300"}`}
-        data-testid="budget-period-position">
-        {behind ? `−${formatIDR(-pos.position)}` : `+${formatIDR(pos.position)}`}
-        <span className="ml-1.5 text-sm font-normal text-neutral-500">
-          {isDaily
-            ? behind
-              ? "tertinggal dari budget"
-              : "masih di bawah budget"
-            : behind
-              ? "melewati budget"
-              : "tersisa dari budget"}
-        </span>
-      </p>
-
-      {/* Diverging bar chart (mock §C) — daily: cap−total per day; full: single-direction total */}
+      {/* Diverging bar chart — daily: cap−total per day; full: single-direction total */}
       <BudgetPeriodChart days={dashboard.days} type={dashboard.type} />
       {/* Screen-reader progress (chart is role="img"; keep a real progressbar for AT). */}
       <div
@@ -533,29 +543,6 @@ function BudgetPeriod({
         aria-valuenow={Math.min(100, pos.progressPct)}
         aria-label="Progres periode"
       />
-
-      {/* Full pace: spent % vs elapsed % of the period (no fake daily deltas). */}
-      {!isDaily && dashboard.totalRangeDays > 0 && (
-        <p className="text-center text-xs tabular-nums text-neutral-500" data-testid="budget-period-pace">
-          Terpakai {pos.progressPct}% · periode berjalan {Math.round((pos.elapsedDays / dashboard.totalRangeDays) * 100)}%
-        </p>
-      )}
-
-      {/* Streak nudge (daily only, ≥ 2 days) */}
-      {isDaily && pos.streak !== null && pos.streak.count >= 2 && (
-        <p
-          data-testid={`budget-period-streak-${pos.streak.under ? "under" : "over"}`}
-          className={`text-center text-xs ${pos.streak.under ? "text-emerald-300" : "text-red-300"}`}>
-          {pos.streak.under
-            ? `${pos.streak.count} hari terakhir di bawah budget`
-            : `${pos.streak.count} hari terakhir di atas budget`}
-        </p>
-      )}
-
-      {/* Footer like mock: "23 Sep — Hari Ini" (plan §C) */}
-      <p className="mt-3 text-center text-xs text-neutral-500">
-        {formatDateShort(new Date(`${startDate}T12:00:00+07:00`), APP_TIMEZONE)} — Hari Ini
-      </p>
     </div>
   );
 }
@@ -776,42 +763,18 @@ function BudgetFormModal({
   );
 }
 
-/** Kelola modal content (plan §A: mode=kelola) — Ganti / Hapus / history / Pakai lagi. */
+/** Kelola modal content — history / Pakai lagi. (Edit+Hapus live on the
+ *  period card.) */
 function BudgetKelolaModal({
   history,
-  active,
   onUseAgain,
-  onGanti,
-  onHapus,
 }: {
   history: BudgetHistoryItem[];
-  active: BudgetActiveResponse["budget"];
   onUseAgain: (source: string, item: { type: BudgetType; amount: number; startDate: string; endDate: string }) => void;
-  onGanti: () => void;
-  onHapus: () => void;
 }) {
   return (
     <>
       <h2 className="text-sm font-semibold text-neutral-200">Kelola budget</h2>
-
-      <div className="mt-3 flex gap-2">
-        <button
-          type="button"
-          data-testid="budget-kelola-ganti"
-          onClick={onGanti}
-          className="h-10 flex-1 rounded-lg border border-emerald-700/70 bg-emerald-600/15 text-sm font-semibold text-emerald-300 active:bg-emerald-600/25"
-        >
-          Ganti
-        </button>
-        <button
-          type="button"
-          data-testid="budget-kelola-hapus"
-          onClick={onHapus}
-          className="h-10 flex-1 rounded-lg border border-neutral-800 bg-neutral-900/60 text-sm font-semibold text-red-300 active:bg-neutral-800"
-        >
-          Hapus
-        </button>
-      </div>
 
       {history.length > 0 && (
         <div className="mt-4">
