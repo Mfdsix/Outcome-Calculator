@@ -9,6 +9,7 @@ import {
 import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
+import { GraphSection } from "../components/GraphSection";
 import { AdvancedControls } from "../components/AdvancedControls";
 import { BarChart } from "../components/BarChart";
 import { BrowseList, type BrowseRow } from "../components/BrowseList";
