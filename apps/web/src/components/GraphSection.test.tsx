@@ -145,6 +145,74 @@ describe("GraphSection", () => {
     localStorage.clear();
   });
 
+  it("hour mode bars: cumulative through each hour vs cap (35+25 ijo, 42+25.5 merah)", () => {
+    localStorage.clear();
+    // 35k → 60k (under) → 102k → 127,5k (over) on an 85k cap.
+    const hourBuckets: ChartBucket[] = [
+      { key: "2026-09-28T08", label: "08", total: 35_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T09", label: "09", total: 25_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T10", label: "10", total: 42_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T11", label: "11", total: 25_500, isCurrent: true, kind: "hour" },
+    ];
+    render(<GraphSection buckets={hourBuckets} snapshot={mockUnder} dailyCap={85_000} />);
+
+    const fillOf = (key: string): Element | null =>
+      screen.getByTestId(`bar-${key}`).querySelector("span.w-full");
+
+    for (const key of ["2026-09-28T08", "2026-09-28T09"]) {
+      const fill = fillOf(key);
+      expect(fill).not.toBeNull();
+      expect(fill).not.toHaveClass("bg-red-500");
+      expect(fill).not.toHaveClass("bg-red-500/30");
+    }
+
+    // Crossing hour (not highlighted) → faded red.
+    const crossFill = fillOf("2026-09-28T10");
+    expect(crossFill).not.toBeNull();
+    expect(crossFill).toHaveClass("bg-red-500/30");
+
+    // Current hour (highlighted) → solid red.
+    const currentFill = fillOf("2026-09-28T11");
+    expect(currentFill).not.toBeNull();
+    expect(currentFill).toHaveClass("bg-red-500");
+  });
+
+  it("hour mode bars: nothing red when the day is under cap", () => {
+    localStorage.clear();
+    const hourBuckets: ChartBucket[] = [
+      { key: "2026-09-28T08", label: "08", total: 60_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T10", label: "10", total: 10_000, isCurrent: true, kind: "hour" },
+    ];
+    render(<GraphSection buckets={hourBuckets} snapshot={mockUnder} dailyCap={100_000} />);
+
+    const currentFill = screen.getByTestId("bar-2026-09-28T10").querySelector("span.w-full");
+    expect(currentFill).not.toBeNull();
+    expect(currentFill).toHaveClass("bg-emerald-500");
+  });
+
+  it("hour mode line: dots turn red from the crossing hour on", async () => {
+    localStorage.clear();
+    const user = userEvent.setup();
+    const hourBuckets: ChartBucket[] = [
+      { key: "2026-09-28T08", label: "08", total: 35_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T09", label: "09", total: 25_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T10", label: "10", total: 42_000, isCurrent: false, kind: "hour" },
+      { key: "2026-09-28T11", label: "11", total: 25_500, isCurrent: true, kind: "hour" },
+    ];
+    render(<GraphSection buckets={hourBuckets} snapshot={mockUnder} dailyCap={85_000} />);
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.getByTestId("chart-point-2026-09-28T08")).toHaveClass("fill-emerald-400");
+    expect(screen.getByTestId("chart-point-2026-09-28T09")).toHaveClass("fill-emerald-400");
+    expect(screen.getByTestId("chart-point-2026-09-28T10")).toHaveClass("fill-red-400");
+    expect(screen.getByTestId("chart-point-2026-09-28T11")).toHaveClass("fill-red-400");
+    // Crossing segment + everything after: red; before: emerald.
+    const svg = screen.getByTestId("spending-line");
+    expect(svg.querySelectorAll("line.stroke-red-500")).toHaveLength(2);
+    expect(svg.querySelectorAll("line.stroke-emerald-500")).toHaveLength(1);
+    localStorage.clear();
+  });
+
   it("passes selectedKey/onSelect through to BarChart", async () => {
     const onSelect = vi.fn();
     const user = userEvent.setup();

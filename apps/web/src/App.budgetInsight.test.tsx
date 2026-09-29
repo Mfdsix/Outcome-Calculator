@@ -3,9 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BudgetActiveResponse, ExpenseDto } from "@expense-app/shared";
+import { getZonedParts } from "@expense-app/shared";
 
 import App from "./app/App";
 import { authApi, budgetsApi, expensesApi } from "./lib/api";
+import { APP_TIMEZONE } from "./lib/periods";
 
 vi.mock("./lib/api", () => {
   return {
@@ -185,6 +187,22 @@ describe("App — budget delta in graph (no toggle)", () => {
     await user.click(screen.getByTestId("chart-mode-toggle"));
     expect(screen.queryByTestId("spending-line")).not.toBeInTheDocument();
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
+  });
+
+  it("D mode marks the current-hour bar red when the day is over", async () => {
+    seedExpenses([{ id: "e1", amount: 150_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+
+    // Current-hour bucket key in Asia/Jakarta civil time.
+    const parts = getZonedParts(new Date(), APP_TIMEZONE);
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    const key = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}`;
+    const bar = await screen.findByTestId(`bar-${key}`);
+    const fill = bar.querySelector("span.w-full");
+    expect(fill).not.toBeNull();
+    expect(fill).toHaveClass("bg-red-500");
   });
 
   it("allocation seam: WEEKLY 700k contributes 100k/day (deferred to allocation branch)", () => {

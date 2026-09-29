@@ -66,6 +66,20 @@ export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = 
 
   const granularityLabel = buckets[0]?.kind === "hour" ? "Per jam" : "Per hari";
 
+  /**
+   * Day-mode red rule: cumulative spending through each hour versus the
+   * daily cap — e.g. 35rb → 60rb (green, green), then 102rb → 127,5rb
+   * (red, red) on an 85rb cap. W/M keep the per-bucket cap × days rule.
+   */
+  const isHourMode = buckets[0]?.kind === "hour";
+  let runningTotal = 0;
+  const cumulative = buckets.map((bucket) => {
+    runningTotal += bucket.total;
+    return runningTotal;
+  });
+  const isHourOver = (index: number): boolean =>
+    overCap !== null && isHourMode && (cumulative[index] ?? 0) > overCap;
+
   return (
     <div className="mb-3 rounded-xl border border-neutral-800 bg-neutral-900/50 px-3 pb-2 pt-3" data-testid="bar-chart">
       <div className="mb-2 flex items-center justify-between">
@@ -83,14 +97,16 @@ export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = 
       </div>
 
       {lineMode ? (
-        <SpendingLine buckets={buckets} selectedKey={selectedKey} onSelect={onSelect} overCap={overCap} />
+        <SpendingLine buckets={buckets} selectedKey={selectedKey} onSelect={onSelect} overCap={overCap} cumulative={isHourMode ? cumulative : null} />
       ) : (
         <div className="flex h-24 items-end gap-[3px]" role="img" aria-label={`Pengeluaran ${granularityLabel.toLowerCase()}`}>
-          {buckets.map((bucket) => {
+          {buckets.map((bucket, index) => {
             const heightPct = hasData ? Math.max(3, Math.round((bucket.total / max) * 100)) : 3;
             const highlighted = selectedKey ? bucket.key === selectedKey : bucket.isCurrent;
             const threshold = bucketThreshold(bucket, overCap);
-            const over = threshold !== null && bucket.total > threshold;
+            const over = isHourMode
+              ? isHourOver(index)
+              : threshold !== null && bucket.total > threshold;
             return (
               <button
                 key={bucket.key}
@@ -136,10 +152,12 @@ export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = 
       )}
 
       <div className="mt-1 flex gap-[3px]">
-        {buckets.map((bucket) => {
+        {buckets.map((bucket, index) => {
           const isActive = selectedKey ? bucket.key === selectedKey : bucket.isCurrent;
           const threshold = bucketThreshold(bucket, overCap);
-          const over = threshold !== null && bucket.total > threshold;
+          const over = isHourMode
+            ? isHourOver(index)
+            : threshold !== null && bucket.total > threshold;
           return (
             <span
               key={bucket.key}
@@ -169,21 +187,29 @@ function SpendingLine({
   selectedKey,
   onSelect,
   overCap,
+  cumulative,
 }: {
   buckets: ChartBucket[];
   selectedKey?: string | null;
   onSelect?: (key: string) => void;
   overCap: number | null;
+  /** Prefix sums for hour mode (null = per-bucket rule). */
+  cumulative: number[] | null;
 }) {
   const max = Math.max(0, ...buckets.map((bucket) => bucket.total));
   const x = (i: number): number => (buckets.length === 1 ? LINE_W / 2 : (i / (buckets.length - 1)) * LINE_W);
   const y = (total: number): number => (max > 0 ? LINE_H - 3 - (total / max) * (LINE_H - 6) : LINE_H - 3);
   const isActive = (bucket: ChartBucket): boolean =>
     selectedKey ? bucket.key === selectedKey : bucket.isCurrent;
-  const isOver = (bucket: ChartBucket): boolean => {
+  const isOver = (bucket: ChartBucket, index: number): boolean => {
+    if (cumulative !== null) return overCap !== null && (cumulative[index] ?? 0) > overCap;
     const threshold = bucketThreshold(bucket, overCap);
     return threshold !== null && bucket.total > threshold;
   };
+  // Segments turn red once either endpoint crosses (the crossing segment
+  // itself reads red, everything after stays red).
+  const segOver = (a: ChartBucket, ai: number, b: ChartBucket, bi: number): boolean =>
+    isOver(a, ai) || isOver(b, bi);
 
   return (
     <svg
@@ -196,7 +222,7 @@ function SpendingLine({
     >
       {buckets.slice(0, -1).map((bucket, i) => {
         const next = buckets[i + 1]!;
-        const segOver = isOver(bucket) || isOver(next);
+        const red = segOver(bucket, i, next, i + 1);
         return (
           <line
             key={bucket.key}
@@ -207,13 +233,13 @@ function SpendingLine({
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
             strokeLinecap="round"
-            className={segOver ? "stroke-red-500" : "stroke-emerald-500"}
+            className={red ? "stroke-red-500" : "stroke-emerald-500"}
           />
         );
       })}
       {buckets.map((bucket, i) => {
         const active = isActive(bucket);
-        const over = isOver(bucket);
+        const over = isOver(bucket, i);
         return (
           <circle
             key={bucket.key}
