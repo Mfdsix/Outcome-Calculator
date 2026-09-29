@@ -352,7 +352,6 @@ function AppBody({ logout }: { logout: () => void }) {
       return next;
     });
   }, []);
-  const [graphMode, setGraphMode] = useState<"spending" | "budget">("spending");
   const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1460,14 +1459,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
           <div className="shrink-0">
             <GraphSection
-              activeBudget={budget.active !== null}
-              mode={graphMode}
-              onModeChange={setGraphMode}
               buckets={chartBuckets}
               selectedKey={chartSelectedKey}
               onSelect={handleBarSelect}
               title={chartTitle}
               snapshot={budgetSnapshot}
+              dailyCap={budget.active?.type === "daily" ? budget.active.amount : null}
             />
           </div>
 

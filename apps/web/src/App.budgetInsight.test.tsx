@@ -3,9 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BudgetActiveResponse, ExpenseDto } from "@expense-app/shared";
+import { getZonedParts } from "@expense-app/shared";
 
 import App from "./app/App";
 import { authApi, budgetsApi, expensesApi } from "./lib/api";
+import { APP_TIMEZONE } from "./lib/periods";
 
 vi.mock("./lib/api", () => {
   return {
@@ -100,99 +102,107 @@ async function renderUnlocked(pin = "ABC123") {
   return user;
 }
 
-describe("App — budget insight in graph", () => {
-  it("no budget → graph mode toggle is absent, bar chart renders as today", async () => {
-    await renderUnlocked();
-    expect(screen.queryByTestId("graph-mode-toggle")).not.toBeInTheDocument();
-    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
-  });
-
-  it("active budget → toggle appears, default spending mode shows bar chart", async () => {
-    getActiveMock.mockResolvedValue(activeBudget());
-    await renderUnlocked();
-
-    expect(await screen.findByTestId("graph-mode-toggle")).toBeInTheDocument();
-    expect(screen.getByTestId("graph-mode-spending")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("graph-mode-budget")).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
-  });
-
-  it("clicking Budget switches graph to budget insight view", async () => {
-    seedExpenses([{ id: "e1", amount: 50_000, occurredAt: TODAY_ISO }]);
-    getActiveMock.mockResolvedValue(activeBudget());
+describe("App — budget delta in graph (no toggle)", () => {
+  it("no budget → special chart is bare: no toggle, no delta", async () => {
     const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
 
-    await screen.findByTestId("bar-chart");
-    await user.click(screen.getByTestId("graph-mode-budget"));
-
-    expect(await screen.findByTestId("budget-insight")).toBeInTheDocument();
-    expect(screen.queryByTestId("bar-chart")).not.toBeInTheDocument();
-    expect(screen.getByTestId("budget-insight-pct")).toHaveTextContent("50.0%");
-  });
-
-  it("clicking Pengeluaran returns to spending view", async () => {
-    seedExpenses([{ id: "e1", amount: 50_000, occurredAt: TODAY_ISO }]);
-    getActiveMock.mockResolvedValue(activeBudget());
-    const user = await renderUnlocked();
-
-    await user.click(screen.getByTestId("graph-mode-budget"));
-    expect(await screen.findByTestId("budget-insight")).toBeInTheDocument();
-
-    await user.click(screen.getByTestId("graph-mode-spending"));
     expect(await screen.findByTestId("bar-chart")).toBeInTheDocument();
+    expect(screen.queryByTestId("graph-mode-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chart-budget-delta")).not.toBeInTheDocument();
+  });
+
+  it("active budget → chart header shows +Rp delta, no toggle", async () => {
+    seedExpenses([{ id: "e1", amount: 50_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+
+    expect(await screen.findByTestId("bar-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("chart-budget-delta")).toHaveTextContent("+Rp50.000");
+    expect(screen.queryByTestId("graph-mode-toggle")).not.toBeInTheDocument();
     expect(screen.queryByTestId("budget-insight")).not.toBeInTheDocument();
   });
 
-  it("D/W/M switching keeps graph mode but recalculates snapshot", async () => {
-    seedExpenses([{ id: "e1", amount: 30_000, occurredAt: TODAY_ISO }]);
-    getActiveMock.mockResolvedValue(activeBudget({ type: "full", amount: 3_000_000 }));
-    const user = await renderUnlocked();
-
-    await user.click(screen.getByTestId("graph-mode-budget"));
-    expect(await screen.findByTestId("budget-insight")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-insight-pct")).toHaveTextContent("1.0%"); // 30k / 3M
-
-    await user.click(screen.getByTestId("period-week"));
-    expect(screen.getByTestId("graph-mode-budget")).toHaveAttribute("aria-pressed", "true");
-    expect(await screen.findByTestId("budget-insight")).toBeInTheDocument();
-  });
-
-  it("over-budget shows OVER status with overspent", async () => {
+  it("over-budget → chart header shows red −Rp delta", async () => {
     seedExpenses([{ id: "e1", amount: 126_000, occurredAt: TODAY_ISO }]);
     getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
 
-    await user.click(screen.getByTestId("graph-mode-budget"));
-    expect(await screen.findByTestId("budget-insight")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-insight-pct")).toHaveTextContent("126.0%");
-    expect(screen.getByTestId("budget-insight-overspent")).toHaveTextContent("Rp26.000");
+    const delta = await screen.findByTestId("chart-budget-delta");
+    expect(delta).toHaveTextContent("−Rp26.000");
+    expect(delta).toHaveClass("text-red-300");
   });
 
-  it("budget starts after period ends → no-overlap message", async () => {
+  it("W mode shows the delta too", async () => {
+    seedExpenses([{ id: "e1", amount: 30_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget({ type: "full", amount: 3_000_000 }));
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-week"));
+
+    expect(await screen.findByTestId("chart-budget-delta")).toHaveTextContent("+Rp2.970.000");
+    expect(screen.queryByTestId("graph-mode-toggle")).not.toBeInTheDocument();
+  });
+
+  it("budget starts after period ends → bare chart, no delta", async () => {
     getActiveMock.mockResolvedValue(
       activeBudget({ startDate: `${NEXT_YEAR}-09-26`, endDate: `${NEXT_YEAR}-10-05` }),
     );
     const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
 
-    await screen.findByTestId("bar-chart");
-    await user.click(screen.getByTestId("graph-mode-budget"));
-
-    expect(await screen.findByTestId("budget-insight-no-overlap")).toHaveTextContent(
-      "Tidak ada budget yang berlaku untuk periode ini.",
-    );
-    expect(screen.queryByTestId("budget-insight")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("bar-chart")).toBeInTheDocument();
+    expect(screen.queryByTestId("chart-budget-delta")).not.toBeInTheDocument();
   });
 
-  it("full budget: amount does not change across D/W/M periods", async () => {
-    seedExpenses([{ id: "e1", amount: 1_000_000, occurredAt: TODAY_ISO }]);
-    getActiveMock.mockResolvedValue(activeBudget({ type: "full", amount: 3_000_000 }));
+  it("W mode marks the over-cap day solid red when selected", async () => {
+    seedExpenses([{ id: "e1", amount: 150_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-week"));
 
-    await user.click(screen.getByTestId("graph-mode-budget"));
-    expect(await screen.findByTestId("budget-insight-pct")).toHaveTextContent("33.3%");
+    // Today (150k > 100k daily cap) is auto-selected → solid red.
+    const key = `${TODAY_YEAR}-${TODAY_MONTH}-${TODAY_DAY}`;
+    const bar = await screen.findByTestId(`bar-${key}`);
+    const fill = bar.querySelector("span.w-full");
+    expect(fill).not.toBeNull();
+    expect(fill).toHaveClass("bg-red-500");
+    expect(screen.getByTestId("chart-budget-delta")).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByTestId("period-month"));
-    expect(await screen.findByTestId("budget-insight-pct")).toHaveTextContent("33.3%");
+  it("chart toggles bars ↔ line in special mode, delta persists", async () => {
+    seedExpenses([{ id: "e1", amount: 50_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+
+    await screen.findByTestId("bar-chart");
+    expect(screen.getByTestId("chart-budget-delta")).toHaveTextContent("+Rp50.000");
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.getByTestId("spending-line")).toBeInTheDocument();
+    expect(screen.getByTestId("chart-budget-delta")).toHaveTextContent("+Rp50.000");
+
+    await user.click(screen.getByTestId("chart-mode-toggle"));
+    expect(screen.queryByTestId("spending-line")).not.toBeInTheDocument();
+    expect(screen.getByTestId("bar-chart")).toBeInTheDocument();
+  });
+
+  it("D mode marks the current-hour bar red when the day is over", async () => {
+    seedExpenses([{ id: "e1", amount: 150_000, occurredAt: TODAY_ISO }]);
+    getActiveMock.mockResolvedValue(activeBudget());
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-day"));
+
+    // Current-hour bucket key in Asia/Jakarta civil time.
+    const parts = getZonedParts(new Date(), APP_TIMEZONE);
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    const key = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}`;
+    const bar = await screen.findByTestId(`bar-${key}`);
+    const fill = bar.querySelector("span.w-full");
+    expect(fill).not.toBeNull();
+    expect(fill).toHaveClass("bg-red-500");
   });
 
   it("allocation seam: WEEKLY 700k contributes 100k/day (deferred to allocation branch)", () => {
