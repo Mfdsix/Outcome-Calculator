@@ -217,22 +217,33 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                   dashboard={dashboard}
                   onEdit={() => useAgain("active", active)}
                   onHapus={() => setConfirmRemove(true)}
+                  onKelola={() => setModalMode("kelola")}
                 />
               </>
             )}
 
-             {/* Finished: gray card + "Buat yang baru" */}
-             {finished && (
-               <BudgetFinished
-                 type={active.type}
-                 amount={active.amount}
-                 spent={active.spent}
-                 remaining={active.remaining}
-                 progressPct={active.progressPct}
-                 periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
-                 onNewBudget={openNewBudget}
-               />
-             )}
+              {/* Finished: gray card + "Buat yang baru" + kelola (no period card here) */}
+              {finished && (
+                <>
+                  <BudgetFinished
+                    type={active.type}
+                    amount={active.amount}
+                    spent={active.spent}
+                    remaining={active.remaining}
+                    progressPct={active.progressPct}
+                    periodLabel={periodLabelOf(active.startDate, active.endDate, active.type)}
+                    onNewBudget={openNewBudget}
+                  />
+                  <button
+                    type="button"
+                    data-testid="budget-kelola-toggle"
+                    onClick={() => setModalMode("kelola")}
+                    className="w-full text-center text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
+                  >
+                    Kelola Budget
+                  </button>
+                </>
+              )}
           </>
         )}
  
@@ -252,19 +263,6 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
         )}
 
       </div>
-
-      {/* Kelola budget button (only when active exists; plan §3) */}
-      {!loading && active !== null && (
-        <button
-          type="button"
-          data-testid="budget-kelola-toggle"
-          onClick={() => setModalMode("kelola")}
-          className="w-full shrink-0 pt-1 text-center text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
-        >
-          Kelola budget
-        </button>
-      )}
-
       {/* Confirmation dialog — rendered in the main div (below scroll), reused for remove */}
       {confirmRemove && (
         <div
@@ -490,33 +488,45 @@ function BudgetPeriod({
   dashboard,
   onEdit,
   onHapus,
+  onKelola,
 }: {
   dashboard: BudgetDashboardData;
   onEdit: () => void;
   onHapus: () => void;
+  onKelola: () => void;
 }) {
   const pos = dashboard.periodPosition;
   const behind = pos.position < 0;
 
   return (
     <div data-testid="budget-period" className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4">
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-between gap-2">
         <button
           type="button"
-          data-testid="budget-active-ganti"
-          onClick={onEdit}
-          className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-200 active:bg-neutral-800"
+          data-testid="budget-kelola-toggle"
+          onClick={onKelola}
+          className="text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
         >
-          Edit
+          Kelola Budget
         </button>
-        <button
-          type="button"
-          data-testid="budget-active-hapus"
-          onClick={onHapus}
-          className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs font-semibold text-red-300 active:bg-neutral-800"
-        >
-          Hapus
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="budget-active-ganti"
+            onClick={onEdit}
+            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-200 active:bg-neutral-800"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            data-testid="budget-active-hapus"
+            onClick={onHapus}
+            className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs font-semibold text-red-300 active:bg-neutral-800"
+          >
+            Hapus
+          </button>
+        </div>
       </div>
 
       <div className="mt-1 flex items-baseline justify-between gap-2">
@@ -575,7 +585,7 @@ function BudgetDayHistory({
             <li
               key={day.date}
               data-testid={`budget-day-row-${day.date}`}
-              className="flex items-center justify-between gap-2 py-3 px-1 hover:bg-white/5">
+              className="flex items-start justify-between gap-2 py-3 px-1 hover:bg-white/5">
               <div className="flex flex-col">
                 <span
                   className="text-sm font-medium text-neutral-200"
@@ -586,18 +596,13 @@ function BudgetDayHistory({
                   {formatDateShort(new Date(`${day.date}T12:00:00+07:00`), APP_TIMEZONE)}
                 </span>
               </div>
-              <div className="flex flex-col items-end">
-                <span className="text-sm font-medium tabular-nums text-neutral-100">
-                  {formatIDR(day.total)}
+              {delta !== null && (
+                <span
+                  className={`text-sm font-medium tabular-nums ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                  data-testid={`budget-day-delta-${day.date}`}>
+                  {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
                 </span>
-                {delta !== null && (
-                  <span
-                    className={`text-xs tabular-nums ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
-                    data-testid={`budget-day-delta-${day.date}`}>
-                    {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
-                  </span>
-                )}
-              </div>
+              )}
             </li>
           );
         })}
