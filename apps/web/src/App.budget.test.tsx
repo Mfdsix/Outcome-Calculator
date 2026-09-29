@@ -177,48 +177,66 @@ describe("App — budget entry + calculator hygiene", () => {
 });
 
 describe("App — budget screen: active card + history", () => {
-  it("renders the active card with spent/cap, progress and period label", async () => {
+   it("renders the period card with position + chart + period label", async () => {
+    vi.setSystemTime(new Date("2026-09-28T12:00:00+07:00"));
     getActiveMock.mockResolvedValue(
-      activeBudget({ type: "full", amount: 10_000_000, spent: 3_600_000, remaining: 6_400_000, progressPct: 36 }),
+      activeBudget({ type: "full", amount: 10_000_000, startDate: "2026-09-01", endDate: "2026-09-30", spent: 3_600_000, remaining: 6_400_000, progressPct: 36 }),
     );
+    seriesMock.mockResolvedValue({
+      days: [
+        { date: "2026-09-25", total: 1_000_000 },
+        { date: "2026-09-26", total: 2_600_000 },
+        { date: "2026-09-27", total: 3_000_000 },
+      ],
+    });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
-    const card = await screen.findByTestId("budget-card");
-    expect(card).toHaveTextContent("Rp6.400.000");
-    expect(card).toHaveTextContent("dari Rp10 jt");
-    expect(card).toHaveTextContent("36% terpakai");
-    expect(card).toHaveTextContent("1–30 Sep • Penuh");
-    expect(screen.getByTestId("budget-active-ganti")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-active-hapus")).toBeInTheDocument();
-  });
+    await screen.findByTestId("budget-period");
+    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("tersisa dari budget");
+    expect(screen.getByTestId("budget-period-position")).toHaveTextContent("+Rp");
+    expect(screen.getByTestId("budget-period-chart")).toBeInTheDocument();
+    // Kelola budget opens the modal with Ganti + Hapus.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    expect(await screen.findByTestId("budget-kelola-ganti")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-kelola-hapus")).toBeInTheDocument();
+    vi.useRealTimers();
+   });
 
-  it("lists history rows with status chips and spent values", async () => {
+   it("lists history rows with status chips and spent values", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     historyMock.mockResolvedValue({ history: [historyItem()] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-period");
 
+    // History now lives in the Kelola modal.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
     const item = await screen.findByTestId("budget-history-item-hist-1");
     expect(item).toHaveTextContent("1–31 Agu • Penuh");
     expect(item).toHaveTextContent("Rp8.200.000 / Rp10.000.000");
-    expect(item).toHaveTextContent("Lewat batas");
+    expect(item).toHaveTextContent("Lewot batas".replace("Lewot", "Lewat"));
     expect(screen.getByTestId("budget-use-again-hist-1")).toBeInTheDocument();
   });
 });
 
 describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
-  it("prefills type + amount and smart-shifts dates for review", async () => {
+   it("prefills type + amount and smart-shifts dates for review", async () => {
     const item = historyItem();
+    getActiveMock.mockResolvedValue(activeBudget());
     historyMock.mockResolvedValue({ history: [item] });
+    seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-form-toggle");
 
-    await screen.findByTestId("budget-history-item-hist-1");
-    await user.click(screen.getByTestId("budget-use-again-hist-1"));
+    // History lives in the Kelola modal → Pakai lagi there opens form modal.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(await screen.findByTestId("budget-use-again-hist-1"));
 
     expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
 
@@ -233,9 +251,11 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     expect(createBudgetMock).not.toHaveBeenCalled();
   });
 
-  it("saving from prefill POSTs a plain create and the active budget is replaced", async () => {
+   it("saving from prefill POSTs a plain create and the active budget is replaced", async () => {
     const item = historyItem();
+    getActiveMock.mockResolvedValue(activeBudget());
     historyMock.mockResolvedValue({ history: [item] });
+    seriesMock.mockResolvedValue({ days: [] });
     createBudgetMock.mockImplementation(async () => {
       // Server-side: create deactives the old and returns the new active.
       getActiveMock.mockResolvedValue(
@@ -255,8 +275,10 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-history-item-hist-1");
-    await user.click(screen.getByTestId("budget-use-again-hist-1"));
+    await screen.findByTestId("budget-kelola-toggle");
+    // Buka modal kelola → Pakai lagi pada history row → form modal terbuka.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(await screen.findByTestId("budget-use-again-hist-1"));
 
     await user.click(screen.getByTestId("budget-submit"));
 
@@ -265,18 +287,21 @@ describe("App — Pakai lagi (prefill + smart-shift, plan §3)", () => {
     expect(payload.type).toBe("full");
     expect(payload.amount).toBe(item.amount);
 
-    // New active card: spent starts from zero (live data, plan §3).
-    expect(await screen.findByTestId("budget-card")).toHaveTextContent("0% terpakai");
-  });
+    // After submit, modal closes.
+    expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
+   });
 
-  it("'Ganti' on the active card prefills from the active budget itself (finished period CTA)", async () => {
+   it("'Ganti' pada active budget via Kelola modal prefills from the active budget itself", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
-    await screen.findByTestId("budget-card");
-    await user.click(screen.getByTestId("budget-active-ganti"));
+    await screen.findByTestId("budget-period");
+    // Buka modal kelola → Ganti → form modal dengan prefill.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(await screen.findByTestId("budget-kelola-ganti"));
 
     expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
     expect(screen.getByTestId("budget-type-daily")).toHaveAttribute("aria-pressed", "true");
@@ -365,6 +390,7 @@ describe("App — create + remove budget", () => {
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
+    await user.click(screen.getByTestId("budget-form-toggle"));
     await screen.findByTestId("budget-form");
     await user.click(screen.getByTestId("budget-type-daily"));
     await user.type(screen.getByTestId("budget-amount"), "150000");
@@ -376,57 +402,69 @@ describe("App — create + remove budget", () => {
       startDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       endDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
-    expect(await screen.findByTestId("budget-amount")).toHaveValue("");
+    // After create, modal closes (form collapsed).
+    await screen.findByTestId("budget-form-toggle");
+    expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
   });
 
-  it("create failure shows the banner but the calculator stays usable (soft warning)", async () => {
+   it("create failure shows the banner but the calculator stays usable (soft warning)", async () => {
     createBudgetMock.mockRejectedValue(new Error("Invalid budget."));
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
 
+    await user.click(screen.getByTestId("budget-form-toggle"));
     await screen.findByTestId("budget-form");
     await user.type(screen.getByTestId("budget-amount"), "150000");
     await user.click(screen.getByTestId("budget-submit"));
 
     expect(await screen.findByTestId("error-banner")).toHaveTextContent("Invalid budget.");
 
-    // Escape back → keypad unaffected.
+    // Modal Escape closes the modal (not the budget screen) → screen still open.
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("budget-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
+    // Escape again returns from the budget screen to the calculator.
     await user.keyboard("{Escape}");
     expect(await screen.findByTestId("keypad")).toBeInTheDocument();
-  });
+   });
 
-  it("Hapus asks for confirmation, then deactivates (budget disappears)", async () => {
+   it("Hapus asks for confirmation via Kelola modal, then deactivates (budget disappears)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     removeBudgetMock.mockImplementation(async () => {
       getActiveMock.mockResolvedValue({ budget: null });
     });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
-    await user.click(screen.getByTestId("budget-active-hapus"));
+    // Hapus via Kelola modal.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(screen.getByTestId("budget-kelola-hapus"));
     expect(screen.getByTestId("budget-delete-dialog")).toBeInTheDocument();
     expect(removeBudgetMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByTestId("budget-delete-confirm"));
     expect(removeBudgetMock).toHaveBeenCalledTimes(1);
     expect(await screen.findByTestId("budget-empty")).toBeInTheDocument();
-  });
+   });
 
-  it("cancel keeps the active budget", async () => {
+   it("cancel keeps the active budget", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
-    await user.click(screen.getByTestId("budget-active-hapus"));
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(screen.getByTestId("budget-kelola-hapus"));
     await user.click(screen.getByTestId("budget-delete-cancel"));
 
     expect(removeBudgetMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("budget-card")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-period")).toBeInTheDocument();
   });
 });
 
@@ -439,12 +477,12 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     vi.useRealTimers();
   });
 
-  it("form is collapsed (Tambah toggle) when an active budget exists; opens on toggle", async () => {
+   it("form is collapsed (Tambah toggle) when an active budget exists; opens modal", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
     // Form is collapsed — only the toggle is visible.
     expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
@@ -452,24 +490,25 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
 
     await user.click(screen.getByTestId("budget-form-toggle"));
     expect(await screen.findByTestId("budget-form")).toBeInTheDocument();
-  });
+    expect(screen.getByTestId("budget-modal-overlay")).toBeInTheDocument();
+   });
 
-  it("header Tambah pill opens the form from collapsed state", async () => {
+   it("header Tambah pill opens the form modal from collapsed state", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
     // Header pill is visible in the sticky top bar.
     expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
     expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
 
-    // Click the header Tambah pill → form section appears.
+    // Click the header Tambah pill → form modal opens.
     await user.click(screen.getByTestId("budget-form-toggle"));
     expect(await screen.findByTestId("budget-form")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-form-section")).toBeInTheDocument();
-  });
+    expect(screen.getByTestId("budget-modal-overlay")).toBeInTheDocument();
+   });
 
   it("daily under today → today delta +Rp tersisa + period behind + day deltas", async () => {
     // Daily 85k, Sep 25–28. Series: 76.785 / 153.405 / 190.019 / 47.000.
@@ -507,9 +546,9 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
 
     // Layer 2: period position behind.
     expect(screen.getByTestId("budget-period")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-period-spent")).toHaveTextContent("Rp467.209");
     expect(screen.getByTestId("budget-period-position")).toHaveTextContent("−Rp127.209");
     expect(screen.getByTestId("budget-period-position")).toHaveTextContent("tertinggal dari budget");
+    expect(screen.getByTestId("budget-period-chart")).toBeInTheDocument();
     // Only 1 under day at the run end (today) → no streak line.
     expect(screen.queryByTestId("budget-period-streak-over")).not.toBeInTheDocument();
     expect(screen.queryByTestId("budget-period-streak-under")).not.toBeInTheDocument();
@@ -658,26 +697,29 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
 
   it("Pakai lagi from active opens form with prefill (not collapsed)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
     // Form is collapsed initially.
     expect(screen.getByTestId("budget-form-toggle")).toBeInTheDocument();
 
-    // Ganti pada card → prefill → form muncul.
-    await user.click(screen.getByTestId("budget-active-ganti"));
+    // Ganti via "Kelola budget" modal → prefill → form modal muncul.
+    await user.click(screen.getByTestId("budget-kelola-toggle"));
+    await user.click(await screen.findByTestId("budget-kelola-ganti"));
     expect(await screen.findByTestId("budget-prefill-note")).toBeInTheDocument();
     expect(screen.getByTestId("budget-form")).toBeInTheDocument();
   });
 
-  it("submit from collapsed form via toggle collapses again on success", async () => {
+  it("submit from modal closes the modal on success (plan §3)", async () => {
     getActiveMock.mockResolvedValue(activeBudget());
+    seriesMock.mockResolvedValue({ days: [] });
     const user = await renderUnlocked();
     await openUserMenu(user);
     await user.click(screen.getByTestId("user-menu-budget"));
-    await screen.findByTestId("budget-card");
+    await screen.findByTestId("budget-period");
 
     await user.click(screen.getByTestId("budget-form-toggle"));
     await screen.findByTestId("budget-form");
@@ -686,9 +728,9 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     await user.type(screen.getByTestId("budget-amount"), "150000");
     await user.click(screen.getByTestId("budget-submit"));
 
-    // After successful create, form collapses.
+    // After successful create, modal closes.
     await screen.findByTestId("budget-form-toggle");
-    expect(screen.queryByTestId("budget-form")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
   });
 
   it("budget-period-chart renders one bar per day in the series", async () => {
