@@ -238,7 +238,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                     type="button"
                     data-testid="budget-kelola-toggle"
                     onClick={() => setModalMode("kelola")}
-                    className="w-full text-center text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
+                    className="mt-2 w-full rounded-lg border border-neutral-700 px-3 py-2 text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:bg-neutral-800"
                   >
                     Kelola Budget
                   </button>
@@ -505,7 +505,7 @@ function BudgetPeriod({
           type="button"
           data-testid="budget-kelola-toggle"
           onClick={onKelola}
-          className="text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:text-neutral-100"
+          className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-300 hover:text-neutral-100 active:bg-neutral-800"
         >
           Kelola Budget
         </button>

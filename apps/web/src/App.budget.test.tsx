@@ -731,8 +731,7 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
     expect(screen.queryByTestId("budget-modal-overlay")).not.toBeInTheDocument();
   });
 
-  it("budget-period-chart renders one bar per day in the series", async () => {
-    getActiveMock.mockResolvedValue(
+  it("budget-period-chart renders one bar per day in the series", async () => {    getActiveMock.mockResolvedValue(
       activeBudget({
         type: "daily",
         amount: 85_000,
@@ -759,5 +758,35 @@ describe("App — budget screen: form toggle + 3-layer dashboard (plan §3)", ()
 
     await screen.findByTestId("budget-period-chart");
     expect(screen.getAllByTestId(/^budget-period-bar-\d{4}-\d{2}-\d{2}$/)).toHaveLength(4);
+  });
+
+  it(">= 14 days auto-transforms bars into an up-down line chart", async () => {
+    const days = Array.from({ length: 16 }, (_, i) => {
+      const day = String(13 + i).padStart(2, "0");
+      // Alternate under/over so the line goes up and down.
+      return { date: `2026-09-${day}`, total: i % 2 === 0 ? 10_000 : 190_019 };
+    });
+    getActiveMock.mockResolvedValue(
+      activeBudget({
+        type: "daily",
+        amount: 85_000,
+        startDate: "2026-09-13",
+        endDate: "2026-10-25",
+        todaySpent: 10_000,
+        spent: 10_000,
+        remaining: 75_000,
+        progressPct: 12,
+        status: "ok",
+      }),
+    );
+    seriesMock.mockResolvedValue({ days });
+    const user = await renderUnlocked();
+    await openUserMenu(user);
+    await user.click(screen.getByTestId("user-menu-budget"));
+
+    await screen.findByTestId("budget-period-chart");
+    expect(screen.getByTestId("budget-period-line")).toBeInTheDocument();
+    expect(screen.queryAllByTestId(/^budget-period-bar-\d{4}-\d{2}-\d{2}$/)).toHaveLength(0);
+    expect(screen.getAllByTestId(/^budget-period-point-\d{4}-\d{2}-\d{2}$/)).toHaveLength(16);
   });
 });
