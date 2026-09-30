@@ -23,4 +23,7 @@ export interface EditOrigin {
   panel: SpecialPanel;
   drillDayKey: string | null;
   selectedKey: string | null;
+  /** Focused single day in W/M summary (hourly view entered via Enter).
+   * Null = overview. Restored so drill keeps its hourly chart after an edit. */
+  focusedDayKey?: string | null;
 }

@@ -290,7 +290,8 @@ describe("App — W/M Enter with allocated expenses (spec §Adv-3)", () => {
     await user.click(screen.getByTestId("period-week"));
     await screen.findByTestId("summary-list");
 
-    await user.click(screen.getByTestId("key-enter"));
+    await user.click(screen.getByTestId("key-enter")); // focus the day
+    await user.click(screen.getByTestId("key-enter")); // drill into it
 
     // Drill panel opens (browse list), not stuck on summary.
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
@@ -355,7 +356,8 @@ describe("App — W/M Enter with allocated expenses (spec §Adv-3)", () => {
     await screen.findByTestId("summary-list");
 
     // Drill into the day bucket to see the transaction
-    await user.click(screen.getByTestId("key-enter"));
+    await user.click(screen.getByTestId("key-enter")); // focus
+    await user.click(screen.getByTestId("key-enter")); // drill
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
 
     // Edit the transaction
@@ -391,7 +393,8 @@ describe("App — W/M Enter with allocated expenses (spec §Adv-3)", () => {
 
     await user.click(screen.getByTestId("period-week"));
     await screen.findByTestId("summary-list");
-    await user.click(screen.getByTestId("key-enter"));
+    await user.click(screen.getByTestId("key-enter")); // focus
+    await user.click(screen.getByTestId("key-enter")); // drill
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("browse-row-w1"));

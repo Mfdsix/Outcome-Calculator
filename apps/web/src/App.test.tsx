@@ -332,7 +332,7 @@ describe("App — special mode (D/W/M browse)", () => {
     expect(screen.getByTestId(`bar-${fromKey}`)).toBeInTheDocument();
   });
 
-  it("month summary stays daily while the chart pairs; Enter drills the whole pair", async () => {
+  it("month summary stays daily while the chart pairs; two Enters focus then drill one day", async () => {
     const day = 86_400_000;
     const now = Date.now();
     const iso = (t: number): string => new Date(t).toISOString();
@@ -357,13 +357,15 @@ describe("App — special mode (D/W/M browse)", () => {
     const rows = screen.getAllByTestId(/^summary-row-/);
     expect(rows).toHaveLength(4);
 
-    // Enter on the auto-selected newest day drills its whole pair.
+    // First Enter focuses the auto-selected newest day (hourly chart + day
+    // total); second Enter drills its transactions (single-day scope).
+    await user.click(screen.getByTestId("key-enter"));
     await user.click(screen.getByTestId("key-enter"));
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
     expect(screen.getByTestId("browse-row-a")).toBeInTheDocument();
-    expect(screen.getByTestId("browse-row-b")).toBeInTheDocument();
+    expect(screen.queryByTestId("browse-row-b")).not.toBeInTheDocument();
     expect(screen.queryByTestId("browse-row-c")).not.toBeInTheDocument();
-    expect(screen.getByTestId("chart-title")).toHaveTextContent("30.000");
+    expect(screen.getByTestId("chart-title")).toHaveTextContent("10.000");
   });
 
   it("digits are inert in special mode (no create), but keypad + key-0 still present", async () => {
@@ -401,14 +403,15 @@ describe("App — special mode (D/W/M browse)", () => {
     await user.click(screen.getByTestId("period-month")); // → special (W/M Enter = drill)
     await screen.findByTestId("summary-list");
 
-    await user.click(screen.getByTestId("key-enter")); // drill into selected day bucket
+    await user.click(screen.getByTestId("key-enter")); // focus the selected day
+    await user.click(screen.getByTestId("key-enter")); // drill into it
     expect(await screen.findByTestId("browse-list")).toBeInTheDocument();
     expect(screen.getByTestId("browse-row-d1")).toBeInTheDocument();
 
-    // Back: tap the highlighted green period → summary, then again → home.
-    await user.click(screen.getByTestId("period-month")); // drill → summary
+    // Back: tap the highlighted green period → focus summary, then again → home.
+    await user.click(screen.getByTestId("period-month")); // drill → focus summary
     expect(await screen.findByTestId("summary-list")).toBeInTheDocument();
-    await user.click(screen.getByTestId("period-month")); // summary → home
+    await user.click(screen.getByTestId("period-month")); // focus summary → home
     expect(await screen.findByTestId("amount-display")).toBeInTheDocument();
   });
 
@@ -818,7 +821,8 @@ describe("App — history navigation matrix", () => {
     await renderUnlocked();
     await user.click(screen.getByTestId("period-month")); // → special M
     await screen.findByTestId("summary-list");
-    await user.click(screen.getByTestId("key-enter")); // drill into bucket
+    await user.click(screen.getByTestId("key-enter")); // focus the day
+    await user.click(screen.getByTestId("key-enter")); // drill into it
     await screen.findByTestId("browse-list");
     expect(screen.getByTestId("browse-list")).toBeInTheDocument();
     await user.click(screen.getByTestId("key-6")); // right → month summary (exits drill)
