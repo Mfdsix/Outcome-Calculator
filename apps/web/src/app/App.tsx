@@ -25,6 +25,7 @@ import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { LockScreen } from "../components/LockScreen";
 import { SummaryList } from "../components/SummaryList";
+import { TotalToggle } from "../components/TotalToggle";
 import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UpdateBanner } from "../components/UpdateBanner";
@@ -32,9 +33,11 @@ import { UserMenu } from "../components/UserMenu";
 import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
+import { useFairTotal } from "../hooks/useFairTotal";
 import { useInsights } from "../hooks/useInsights";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
+import { useTotalMode } from "../hooks/useTotalMode";
 import {
   ApiError,
   isOnline,
@@ -46,7 +49,7 @@ import {
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "../lib/chart";
-import { formatIDR, groupDigits } from "../lib/currency";
+import { formatIDR, formatIDRAbbreviated, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
@@ -295,7 +298,7 @@ function AppBody({ logout }: { logout: () => void }) {
     specialPanel,
     selectedKey,
     expenses,
-    totalLabel,
+    total,
     periodLabel,
     loading,
     openHistory,
@@ -315,7 +318,45 @@ function AppBody({ logout }: { logout: () => void }) {
     showingCachedDay,
     dayFetchFailed,
     wmOfflineRejected,
-  } = useExpenses();
+   } = useExpenses();
+
+  const { mode: totalMode, toggle: toggleTotalMode } = useTotalMode();
+  const optimisticExpenses = useMemo(
+    () =>
+      expenses.filter(
+        (item) => item.id.startsWith("optimistic-") || item.id.startsWith("temp-"),
+      ),
+    [expenses],
+  );
+   /** Trigger fair refetch on CRUD, period/mode change, or allocation signature change.
+    * The signature includes allocationType per row so toggling WEEKLY↔MONTHLY with
+    * the same length+total still triggers a fair refetch (100k vs 10k). */
+   const fairExpensesSignature = useMemo(
+     () =>
+       expenses
+         .map((e) => `${e.id}:${e.amount}:${e.allocationType ?? "NONE"}`)
+         .sort()
+         .join("|"),
+     [expenses],
+   );
+   const fairRefreshKey = useMemo(
+     () => `${period}:${totalMode}:${fairExpensesSignature}`,
+     [period, totalMode, fairExpensesSignature],
+   );
+  const { fairTotal, fairLoading } = useFairTotal(
+    period,
+    totalMode,
+    optimisticExpenses,
+    fairRefreshKey,
+  );
+
+  /** Display total + label: fair when active (with raw fallback), else raw. */
+  const displayTotal = useMemo(() => {
+    if (totalMode === "fair" && fairTotal !== null) return fairTotal;
+    return total;
+  }, [totalMode, fairTotal, total]);
+  const displayLabel = formatIDRAbbreviated(displayTotal);
+  const isFairFallback = totalMode === "fair" && fairTotal === null;
 
   const calc = useCalculator();
   const budget = useBudget();
@@ -1354,22 +1395,25 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
-      <Header
-        periodLabel={effectivePeriodLabel}
-        totalLabel={totalLabel}
-        status={
-          <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
-        }
-        trailing={
-          <UserMenu
-            onLogout={logout}
-            onAccountDeleted={logout}
-            budgetStatus={budget.active?.status ?? null}
-            onOpenBudget={openBudget}
-            onOpenInsight={openInsight}
-          />
-        }
-      />
+       <Header
+         periodLabel={effectivePeriodLabel}
+         totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
+         status={
+           <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+         }
+         trailing={
+           <>
+             <TotalToggle mode={totalMode} onToggle={toggleTotalMode} loading={fairLoading} />
+             <UserMenu
+               onLogout={logout}
+               onAccountDeleted={logout}
+               budgetStatus={budget.active?.status ?? null}
+               onOpenBudget={openBudget}
+               onOpenInsight={openInsight}
+             />
+           </>
+         }
+       />
 
       <UpdateBanner />
 
