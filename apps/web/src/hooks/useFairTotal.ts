@@ -12,16 +12,28 @@ import type { TotalMode } from "./useTotalMode";
 export interface UseFairTotalResult {
   fairTotal: number | null;
   fairLoading: boolean;
+  /** True when at least one expense in the fetched expanded range has an
+   * allocationType !== "NONE" — used to decide toggle visibility when fair
+   * has not yet differed from raw (e.g. tail-only allocation overlap). */
+  hasAllocated: boolean;
+}
+
+export interface UseFairTotalOpts {
+  /** When true, fetch the expanded fair range even in raw mode. Used for the
+   * header D-only "peek" so the toggle can appear instantly on first switch
+   * and so a tail-overlap (fair !== raw) is detectable. */
+  peek?: boolean;
 }
 
 /**
  * Fetch the allocation-aware ("fair") total for the current period.
  *
- * - Skips work entirely when mode === "raw" (returns null, no request).
- * - On fair mode: fetches an expanded range (period.from − 30d → period.to) so
- *   allocated expenses whose windows overlap the period are included, then
- *   computes the fair total locally with fairTotalForPeriod (capped at tomorrow
- *   Jakarta midnight).
+ * - Skips work entirely when mode === "raw" UNLESS opts.peek is true (D-only
+ *   peek so the toggle can appear / be instant on first toggle).
+ * - On fair mode (or peek): fetches an expanded range (period.from − 30d →
+ *   period.to) so allocated expenses whose windows overlap the period are
+ *   included, then computes the fair total locally with fairTotalForPeriod
+ *   (capped at tomorrow Jakarta midnight).
  * - Merges in-memory optimistic rows (temp-/optimistic- prefixed ids).
  * - Aborts on period/mode/refreshKey change; on error/offline falls back to
  *   null so the caller displays the raw total.
@@ -40,9 +52,11 @@ export function useFairTotal(
   refreshKey: unknown = undefined,
   /** Injectable "now" for deterministic tests. */
   now: Date = new Date(),
+  opts: UseFairTotalOpts = {},
 ): UseFairTotalResult {
   const [fairTotal, setFairTotal] = useState<number | null>(null);
   const [fairLoading, setFairLoading] = useState(false);
+  const [hasAllocated, setHasAllocated] = useState(false);
 
   const inflightRef = useRef<AbortController | null>(null);
 
@@ -54,11 +68,16 @@ export function useFairTotal(
     nowTimestampRef.current = now.getTime();
   }, [refreshKey, now]);
 
+  // Decide whether to fetch. Fair mode always fetches; raw mode fetches only
+  // during a D-only "peek" so the toggle can appear / switch instantly.
+  const shouldFetch = mode === "fair" || (opts.peek === true && period === "day");
+
   const fetchFair = useCallback(
     (signal: AbortSignal) => {
-      if (mode !== "fair") return;
+      if (!shouldFetch) return;
       setFairLoading(true);
       setFairTotal(null);
+      setHasAllocated(false);
 
       const frozenNow = new Date(nowTimestampRef.current);
       const { from, to } = expandedFairQuery(period, frozenNow);
@@ -73,6 +92,8 @@ export function useFairTotal(
           for (const opt of optimisticExpenses) {
             if (!serverIds.has(opt.id)) merged.push(opt);
           }
+
+          setHasAllocated(merged.some((e) => e.allocationType && e.allocationType !== "NONE"));
 
           const total = fairTotalForPeriod(merged, range, APP_TIMEZONE, frozenNow);
           if (!Number.isFinite(total)) return;
@@ -98,21 +119,22 @@ export function useFairTotal(
           setFairLoading(false);
         });
     },
-    [mode, period, optimisticExpenses],
+    [shouldFetch, period, optimisticExpenses],
   );
 
   useEffect(() => {
-    if (mode !== "fair") {
+    if (!shouldFetch) {
       inflightRef.current?.abort();
       setFairTotal(null);
       setFairLoading(false);
+      setHasAllocated(false);
       return;
     }
     const controller = new AbortController();
     inflightRef.current = controller;
     fetchFair(controller.signal);
     return () => controller.abort();
-  }, [mode, fetchFair, refreshKey]);
+  }, [shouldFetch, fetchFair, refreshKey]);
 
-  return { fairTotal, fairLoading };
+  return { fairTotal, fairLoading, hasAllocated };
 }

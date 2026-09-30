@@ -19,6 +19,7 @@ vi.mock("./lib/api", () => {
       history: vi.fn().mockResolvedValue({ history: [] }),
       create: vi.fn().mockResolvedValue({ id: "budget-1" }),
       remove: vi.fn().mockResolvedValue(undefined),
+      activeSeries: vi.fn().mockResolvedValue({ days: [] }),
     },
     authApi: { login, refresh },
     ApiError: class ApiError extends Error {
@@ -96,7 +97,7 @@ async function renderUnlocked(pin = "ABC123"): Promise<ReturnType<typeof userEve
 }
 
 describe("App — Fair Total Toggle (spec §Adv-5)", () => {
-  it("shows Raw total by default and toggles to Fair on click", async () => {
+  it("shows Raw total by default and toggles to Fair on amount click, back on second click", async () => {
     // Use a date-independent approach: the main fetch's `from` is later than
     // the expanded fair fetch's `from` (30 days earlier). Return the same data
     // for both — fair calc filters by the real period range anyway.
@@ -109,22 +110,43 @@ describe("App — Fair Total Toggle (spec §Adv-5)", () => {
 
     const user = await renderUnlocked();
 
-    // Default: raw total shown (1,050,000 → Rp1,1 jt)
-    expect(await screen.findByTestId("header-total")).toHaveTextContent("Rp1,1 jt");
+    // Default: raw total shown (1,050,000 → Rp1,1 jt) as a clickable button
+    const total = await screen.findByTestId("header-total");
+    expect(total).toHaveTextContent("Rp1,1 jt");
+    expect(total.tagName).toBe("BUTTON");
+    expect(total.className).toMatch(/fair-dotted/);
+    expect(total).toHaveAttribute("aria-pressed", "false");
 
-    // Toggle to Fair
-    await user.click(screen.getByTestId("total-toggle-fair"));
-
-    // Fair: 50k (NONE full) + 100k (WEEKLY 1/7) + 10k (MONTHLY 1/30) = 160k
+    // Click the amount → Fair: 50k (NONE full) + 100k (WEEKLY 1/7) + 10k (MONTHLY 1/30) = 160k
+    await user.click(total);
     await waitFor(() => {
       expect(screen.getByTestId("header-total")).toHaveTextContent("Rp160.000");
     });
+    expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "true");
+
+    // Click again → back to Raw
+    await user.click(screen.getByTestId("header-total"));
+    await waitFor(() => {
+      expect(screen.getByTestId("header-total")).toHaveTextContent("Rp1,1 jt");
+    });
+    expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("renders TotalToggle in the header trailing cluster next to UserMenu", async () => {
+  it("renders clickable total with dotted underline (day period, with allocation)", async () => {
+    const expenses = [
+      { id: "e1", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses, total: 700_000 });
+
     await renderUnlocked();
     const header = await screen.findByRole("banner");
-    expect(header).toContainElement(screen.getByTestId("total-toggle"));
+    const headerTotal = screen.getByTestId("header-total");
+    expect(header).toContainElement(headerTotal);
+    // Clickable affordance: button + dotted underline, no separate toggle icon
+    expect(headerTotal.tagName).toBe("BUTTON");
+    expect(headerTotal.className).toMatch(/fair-dotted/);
+    expect(screen.queryByTestId("total-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("total-toggle-button")).not.toBeInTheDocument();
   });
 
   it("falls back to raw when Fair fetch fails (offline/error)", async () => {
@@ -150,46 +172,86 @@ describe("App — Fair Total Toggle (spec §Adv-5)", () => {
 
     expect(await screen.findByTestId("header-total")).toHaveTextContent("Rp750.000");
 
-    // Toggle to Fair — expanded fetch fails → fallback to raw + ·raw badge
-    await user.click(screen.getByTestId("total-toggle-fair"));
+    // Click the amount → expanded fetch fails → fallback to raw + ·raw badge
+    await user.click(screen.getByTestId("header-total"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("header-total")).toHaveTextContent("Rp750.000");
+      expect(screen.getByTestId("header-total")).toHaveTextContent("·raw");
     });
   });
 
   it("persists toggle mode across reload", async () => {
-    listMock.mockResolvedValue({ expenses: [], total: 0 });
+    // Need allocation so the amount is clickable
+    const expenses = [
+      { id: "e1", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses, total: 700_000 });
     const user = await renderUnlocked();
 
-    // Toggle to Fair
-    await user.click(screen.getByTestId("total-toggle-fair"));
+    // Click the amount → Fair
+    await user.click(screen.getByTestId("header-total"));
 
-    // Re-render (simulate reload by unmount/remount)
     await waitFor(() => {
-      expect(screen.getByTestId("total-toggle-fair")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "true");
     });
 
-    // Unmount and re-mount
     // The persisted mode should be "fair" on re-mount
     // (We verify via localStorage directly since full reload is hard to test)
     expect(localStorage.getItem("expense-app.total-mode")).toBe("fair");
   });
 
   it("Raw total stays unchanged when Fair is active and expenses update", async () => {
+    // Need WEEKLY allocation so the amount is clickable
     const mainExpenses = [
       { id: "e1", amount: 50_000, occurredAt: new Date().toISOString(), allocationType: "NONE" as const },
+      { id: "e2", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
     ];
-    listMock.mockResolvedValue({ expenses: mainExpenses, total: 50_000 });
+    listMock.mockResolvedValue({ expenses: mainExpenses, total: 750_000 });
 
     const user = await renderUnlocked();
-    expect(await screen.findByTestId("header-total")).toHaveTextContent("Rp50.000");
+    expect(await screen.findByTestId("header-total")).toHaveTextContent("Rp750.000");
 
-    // Toggle to Fair
-    await user.click(screen.getByTestId("total-toggle-fair"));
+    // Click the amount → Fair
+    await user.click(screen.getByTestId("header-total"));
+
     await waitFor(() => {
-      // NONE in-period → fair = raw = 50k
-      expect(screen.getByTestId("header-total")).toHaveTextContent("Rp50.000");
+      // NONE 50k + WEEKLY 1/7 of 700k = 100k → fair = 150k
+      expect(screen.getByTestId("header-total")).toHaveTextContent("Rp150.000");
     });
+  });
+
+  it("D-only: plain total when period is day but no allocation + fair === raw", async () => {
+    // No allocationType on expenses → hasAllocatedInDay = false
+    const rawExpenses = [
+      { id: "e1", amount: 50_000, occurredAt: new Date().toISOString(), allocationType: "NONE" as const },
+    ];
+    listMock.mockResolvedValue({ expenses: rawExpenses, total: 50_000 });
+
+    await renderUnlocked();
+
+    // Default mode is raw, no allocation, fair === raw → plain non-clickable total
+    const total = await screen.findByTestId("header-total");
+    expect(total.tagName).toBe("SPAN");
+    expect(total.className).not.toMatch(/fair-dotted/);
+  });
+
+  it("D-only: amount becomes clickable after fair loads and differs from raw (tail-overlap)", async () => {
+    // MONTHLY expense from 10 days ago → fair (10k for today) differs from raw (0k today since it's outside day range)
+    const now = new Date("2026-09-25T14:00:00+07:00");
+    vi.setSystemTime(now);
+    const expenses = [
+      { id: "e1", amount: 300_000, occurredAt: "2026-09-15T10:00:00+07:00", allocationType: "MONTHLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses, total: 0 });
+
+    await renderUnlocked();
+
+    // Raw total is 0 (expenses outside day range). Fair will be 10k (1/30 × 300k).
+    await screen.findByTestId("header-total");
+    // Wait for fair peek to load and detect difference → amount becomes a button
+    await waitFor(() => {
+      expect(screen.getByTestId("header-total").tagName).toBe("BUTTON");
+    });
+    vi.useRealTimers();
   });
 });

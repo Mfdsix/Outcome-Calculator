@@ -430,3 +430,21 @@ body {
 .animate-shake {
   animation: shake 0.4s ease-in-out;
 }
+
+/* ---------------------------------------------------------------------------
+ * Fair-value affordance: widely-spaced dotted underline for clickable totals
+ * (header D total + budget Today headline). Uses a radial-gradient dot
+ * pattern instead of `border-dotted` so the dot gap is tunable — bump
+ * `background-size` width for more renggang, shrink for tighter.
+ * ------------------------------------------------------------------------- */
+.fair-dotted {
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, currentColor 55%, transparent) 1px,
+    transparent 1.4px
+  );
+  background-size: 8px 4px;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+  padding-bottom: 5px;
+}

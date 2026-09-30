@@ -25,6 +25,7 @@ import { BudgetModal } from "./BudgetModal";
 import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodChart";
 import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
+import type { TotalMode } from "../hooks/useTotalMode";
 import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
 import { relativeDayLabel } from "../lib/dayLabels";
@@ -39,6 +40,14 @@ export interface BudgetScreenProps {
   /** Day-by-day spend series from GET /api/budgets/active/series (sparse). */
   series: BudgetDayPoint[] | null;
   seriesLoading: boolean;
+  /** Independent fair/raw toggle for the "Today" card. */
+  budgetTodayMode: TotalMode;
+  onToggleBudgetTodayMode: () => void;
+  /** Fair total for today (day-scoped), or null when not yet loaded / failed. */
+  budgetTodaySpentFair: number | null;
+  budgetTodayLoading: boolean;
+  /** True when in fair mode but the fair total is unavailable — show ·raw fallback. */
+  budgetTodayFairFallback: boolean;
 }
 
 interface PrefillState {
@@ -67,7 +76,7 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback }: BudgetScreenProps) {
   /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
   const nowISO = useMemo(() => new Date().toISOString(), []);
@@ -207,12 +216,17 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
             {!finished && dashboard !== null && (
               <>
                 {/* Layer 1: Today overview */}
-                <BudgetToday
-                  type={active.type}
-                  amount={active.amount}
-                  todaySpent={active.todaySpent}
-                  status={active.status}
-                />
+                 <BudgetToday
+                   type={active.type}
+                   amount={active.amount}
+                   todaySpent={active.todaySpent}
+                   status={active.status}
+                   todayMode={budgetTodayMode}
+                   onToggleTodayMode={onToggleBudgetTodayMode}
+                   todaySpentFair={budgetTodaySpentFair}
+                   todayLoading={budgetTodayLoading}
+                   fairFallback={budgetTodayFairFallback}
+                 />
 
                 {/* Layer 2: Period card */}
                 <BudgetPeriod
@@ -408,31 +422,91 @@ function BudgetFinished({
   );
 }
 
+/** Today headline: plain text normally, but a clickable button with a dotted
+ *  underline when a fair value exists (click toggles raw↔fair). */
+function BudgetTodayHeadline({
+  testid,
+  text,
+  className,
+  clickable,
+  fairActive,
+  loading,
+  onClick,
+}: {
+  testid: string;
+  text: string;
+  className: string;
+  clickable: boolean;
+  fairActive: boolean;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  if (!clickable) {
+    return (
+      <p data-testid={testid} className={`mt-1 ${className}`}>
+        {text}
+      </p>
+    );
+  }
+  const label = fairActive ? "Kembali ke total normal" : "Tampilkan total fair";
+  return (
+    <button
+      type="button"
+      data-testid={testid}
+      aria-pressed={fairActive}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`fair-dotted mt-1 cursor-pointer text-left ${className} ${
+        loading ? "animate-pulse" : ""
+      }`}
+    >
+      {text}
+    </button>
+  );
+}
+
 /** Layer 1 — Today overview: label + status chip, big signed delta
  *  headline (daily: + tersisa / − melewati; full: today's total), progress
- *  bar, and right-aligned percentage. */
+ *  bar, and right-aligned percentage. The headline itself is clickable when a
+ *  fair value exists (independent from the header toggle). */
 function BudgetToday({
   type,
   amount,
   todaySpent,
   status,
+  todayMode,
+  onToggleTodayMode,
+  todaySpentFair,
+  todayLoading,
+  fairFallback,
 }: {
   type: BudgetType;
   amount: number;
   todaySpent: number;
   /** Overall budget status — chip source for full budgets (no daily cap). */
   status: BudgetStatus;
+  todayMode: TotalMode;
+  onToggleTodayMode: () => void;
+  todaySpentFair: number | null;
+  todayLoading: boolean;
+  fairFallback: boolean;
 }) {
   const isDaily = type === "daily";
   const cap = amount;
-  const todayPct = cap > 0 ? Math.round((todaySpent / cap) * 100) : 0;
+  // Display spend switches to fair when active; otherwise raw.
+  const displaySpent = todayMode === "fair" && todaySpentFair !== null ? todaySpentFair : todaySpent;
+  const todayPct = cap > 0 ? Math.round((displaySpent / cap) * 100) : 0;
   const pct = Math.min(100, todayPct);
   // Today status ladder (same 80% rule as the budget ladder).
-  const todayStatus = todaySpent > cap ? "over" : todaySpent * 100 >= cap * 80 ? "warning" : "ok";
+  const todayStatus = displaySpent > cap ? "over" : displaySpent * 100 >= cap * 80 ? "warning" : "ok";
   const chipStatus = isDaily ? todayStatus : status;
   const chip = STATUS_CHIP[chipStatus];
   const barColor = chipStatus === "over" ? "bg-red-500" : chipStatus === "warning" ? "bg-amber-500" : "bg-emerald-500";
-  const delta = cap - todaySpent;
+  const delta = cap - displaySpent;
+  /** The headline itself is clickable (dotted underline) when a fair value exists. */
+  const todayClickable =
+    todayMode === "fair" || (todaySpentFair !== null && todaySpentFair !== todaySpent);
 
   return (
     <div
@@ -451,17 +525,25 @@ function BudgetToday({
         </span>
       </div>
       {isDaily ? (
-        <p
-          data-testid="budget-today-delta"
-          className={`mt-1 text-3xl font-bold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}>
-          {delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
-        </p>
+        <BudgetTodayHeadline
+          testid="budget-today-delta"
+          text={fairFallback ? `${delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`} ·raw` : delta >= 0 ? `+${formatIDR(delta)}` : `−${formatIDR(-delta)}`}
+          className={`text-3xl font-bold tabular-nums ${delta >= 0 ? "text-emerald-300" : "text-red-300"}`}
+          clickable={todayClickable}
+          fairActive={todayMode === "fair"}
+          loading={todayLoading}
+          onClick={onToggleTodayMode}
+        />
       ) : (
-        <p
-          data-testid="budget-today-spent"
-          className="mt-1 text-3xl font-bold tabular-nums text-neutral-100">
-          {formatIDR(todaySpent)}
-        </p>
+        <BudgetTodayHeadline
+          testid="budget-today-spent"
+          text={fairFallback ? `${formatIDR(displaySpent)} ·raw` : formatIDR(displaySpent)}
+          className="text-3xl font-bold tabular-nums text-neutral-100"
+          clickable={todayClickable}
+          fairActive={todayMode === "fair"}
+          loading={todayLoading}
+          onClick={onToggleTodayMode}
+        />
       )}
       <div
         className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-800"
