@@ -1,8 +1,11 @@
 import {
+  addCivilDays,
   dayRange,
+  getZonedParts,
   last30DaysRange,
   last7DaysRange,
   toIsoWithOffset,
+  zonedWallTimeToUtc,
 } from "@expense-app/shared";
 import type { PeriodRange } from "@expense-app/shared";
 
@@ -50,4 +53,28 @@ export function periodQuery(period: Period, now: Date = new Date()): { from: str
     from: toIsoWithOffset(from, APP_TIMEZONE),
     to: toIsoWithOffset(to, APP_TIMEZONE),
   };
+}
+
+/**
+ * Expanded query for the fair-total fetch: same `to` as periodQuery, but `from`
+ * is pushed back 30 civil days so allocated expenses whose allocation window
+ * started before `period.from` are included (max allocation window = MONTHLY =
+ * 30 days). The fair total itself is still capped at "tomorrow 00:00 Jakarta"
+ * by fairPeriodRange/fairTotalForPeriod (spec §Adv-5).
+ */
+export function expandedFairQuery(period: Period, now: Date = new Date()): {
+  from: string;
+  to: string;
+  fairFrom: string;
+  fairTo: string;
+} {
+  const { from: fairFrom, to: fairTo } = periodQuery(period, now);
+  const range = currentPeriodRange(period, now);
+  const parts = getZonedParts(range.from, APP_TIMEZONE);
+  const expandedStart = addCivilDays(parts, -30);
+  const expandedFrom = toIsoWithOffset(
+    zonedWallTimeToUtc(APP_TIMEZONE, expandedStart),
+    APP_TIMEZONE,
+  );
+  return { from: expandedFrom, to: fairTo, fairFrom, fairTo: fairTo };
 }

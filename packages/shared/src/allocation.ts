@@ -228,3 +228,45 @@ export function allocationAwareTotal(
     return sum + expenseEffectiveAmount(expense, period, timeZone);
   }, 0);
 }
+
+/**
+ * Build the effective (fair) period range: the requested period capped at
+ * "tomorrow 00:00 civil" in `timeZone`. This ensures future-tail days from a
+ * rolling W/M window do not leak into today's fair total (spec §Adv-5: potong
+ * hari ini). `now` is injectable for deterministic tests.
+ */
+export function fairPeriodRange(
+  period: { from: Date; to: Date },
+  timeZone: string,
+  now: Date = new Date(),
+): { from: Date; to: Date } {
+  const parts = getZonedParts(now, timeZone);
+  const tomorrow = addCivilDays(
+    { year: parts.year, month: parts.month, day: parts.day },
+    1,
+  );
+  const tomorrowMidnight = zonedWallTimeToUtc(timeZone, tomorrow);
+  return {
+    from: period.from,
+    to: new Date(Math.min(period.to.getTime(), tomorrowMidnight.getTime())),
+  };
+}
+
+/**
+ * Convenience: compute the fair total for a period over a list of expenses.
+ * The candidate `expenses` should be fetched from an expanded range (at least
+ * 30 days before `period.from`) so allocated expenses whose windows overlap
+ * the period are included. (spec §Adv-5)
+ *
+ * Uses fairPeriodRange internally so the future tail is capped at tomorrow
+ * 00:00 civil in `timeZone`.
+ */
+export function fairTotalForPeriod(
+  expenses: Array<{ amount: number; occurredAt: Date | string; allocationType?: AllocationType }>,
+  period: { from: Date; to: Date },
+  timeZone: string,
+  now: Date = new Date(),
+): number {
+  const range = fairPeriodRange(period, timeZone, now);
+  return allocationAwareTotal(expenses, range, timeZone);
+}

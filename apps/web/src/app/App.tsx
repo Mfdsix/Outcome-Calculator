@@ -32,9 +32,11 @@ import { UserMenu } from "../components/UserMenu";
 import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
+import { useFairTotal } from "../hooks/useFairTotal";
 import { useInsights } from "../hooks/useInsights";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
+import { useTotalMode } from "../hooks/useTotalMode";
 import {
   ApiError,
   isOnline,
@@ -46,7 +48,7 @@ import {
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
 import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "../lib/chart";
-import { formatIDR, groupDigits } from "../lib/currency";
+import { formatIDR, formatIDRAbbreviated, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
@@ -295,7 +297,7 @@ function AppBody({ logout }: { logout: () => void }) {
     specialPanel,
     selectedKey,
     expenses,
-    totalLabel,
+    total,
     periodLabel,
     loading,
     openHistory,
@@ -315,7 +317,71 @@ function AppBody({ logout }: { logout: () => void }) {
     showingCachedDay,
     dayFetchFailed,
     wmOfflineRejected,
-  } = useExpenses();
+   } = useExpenses();
+
+   const { mode: totalMode, toggle: toggleTotalMode } = useTotalMode();
+   const optimisticExpenses = useMemo(
+     () =>
+       expenses.filter(
+         (item) => item.id.startsWith("optimistic-") || item.id.startsWith("temp-"),
+       ),
+     [expenses],
+   );
+   /** Trigger fair refetch on CRUD, period/mode change, or allocation signature change.
+    * The signature includes allocationType per row so toggling WEEKLY↔MONTHLY with
+    * the same length+total still triggers a fair refetch (100k vs 10k). */
+   const fairExpensesSignature = useMemo(
+     () =>
+       expenses
+         .map((e) => `${e.id}:${e.amount}:${e.allocationType ?? "NONE"}`)
+         .sort()
+         .join("|"),
+     [expenses],
+   );
+   const fairRefreshKey = useMemo(
+     () => `${period}:${totalMode}:${fairExpensesSignature}`,
+     [period, totalMode, fairExpensesSignature],
+   );
+   const isSpecial = viewMode === "special";
+   const isBudget = viewMode === "budget";
+   const isInsight = viewMode === "insight";
+   /** D-only peek: fetch the expanded fair range even in raw mode so the toggle
+    * can appear instantly on first switch and tail-overlap (fair !== raw) is
+    * detectable. W/M uses fair-only (saves a request). */
+   const { fairTotal, fairLoading, hasAllocated: fairHasAllocated } = useFairTotal(
+     period,
+     totalMode,
+     optimisticExpenses,
+     fairRefreshKey,
+     new Date(),
+     { peek: period === "day" },
+   );
+
+   /** Display total + label: fair when active (with raw fallback), else raw. */
+   const displayTotal = useMemo(() => {
+     if (totalMode === "fair" && fairTotal !== null) return fairTotal;
+     return total;
+   }, [totalMode, fairTotal, total]);
+   const displayLabel = formatIDRAbbreviated(displayTotal);
+   const isFairFallback = totalMode === "fair" && fairTotal === null;
+
+   /** Has any expense in the current period carry an allocation? (day list only) */
+   const hasAllocatedInDay = useMemo(() => {
+     if (period !== "day") return fairHasAllocated;
+     const { from, to } = currentPeriodRange("day", new Date());
+     const fromMs = from.getTime();
+     const toMs = to.getTime();
+     return expenses.some(
+       (e) => e.allocationType && e.allocationType !== "NONE" &&
+         new Date(e.occurredAt).getTime() >= fromMs && new Date(e.occurredAt).getTime() < toMs,
+     );
+   }, [period, expenses, fairHasAllocated]);
+
+   const fairDiffers = fairTotal !== null && fairTotal !== total;
+
+   /** The D total itself is clickable (dotted underline) when a fair value exists. */
+   const totalClickable = !isBudget && !isInsight && period === "day" &&
+     (totalMode === "fair" || hasAllocatedInDay || fairDiffers);
 
   const calc = useCalculator();
   const budget = useBudget();
@@ -356,9 +422,24 @@ function AppBody({ logout }: { logout: () => void }) {
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isSpecial = viewMode === "special";
-  const isBudget = viewMode === "budget";
-  const isInsight = viewMode === "insight";
+  // Budget "Today" fair toggle — independent storage key so it never affects
+  // the header total mode. Day-scoped, only fetches while on the budget view.
+  const { mode: budgetTodayMode, toggle: toggleBudgetTodayMode } = useTotalMode(
+    "expense-app.budget-today-mode",
+  );
+  const budgetFairRefreshKey = useMemo(
+    () => `budget-day:${budgetTodayMode}:${fairExpensesSignature}`,
+    [budgetTodayMode, fairExpensesSignature],
+  );
+  const { fairTotal: budgetFairTotal, fairLoading: budgetFairLoading } = useFairTotal(
+    "day",
+    isBudget ? budgetTodayMode : "raw",
+    optimisticExpenses,
+    budgetFairRefreshKey,
+    new Date(),
+    { peek: isBudget },
+  );
+  const budgetTodayFairFallback = budgetTodayMode === "fair" && budgetFairTotal === null;
   // Plain calculator screen: budget/insight/special history own the full body
   // and must not share the row with the period strip or amount input.
   const isHomeScreen = !isSpecial && !isBudget && !isInsight;
@@ -1354,22 +1435,26 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
-      <Header
-        periodLabel={effectivePeriodLabel}
-        totalLabel={totalLabel}
-        status={
-          <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
-        }
-        trailing={
-          <UserMenu
-            onLogout={logout}
-            onAccountDeleted={logout}
-            budgetStatus={budget.active?.status ?? null}
-            onOpenBudget={openBudget}
-            onOpenInsight={openInsight}
-          />
-        }
-      />
+       <Header
+         periodLabel={effectivePeriodLabel}
+         totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
+         status={
+           <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+         }
+         totalClickable={totalClickable}
+         totalFairActive={totalMode === "fair"}
+         totalLoading={fairLoading}
+         onTotalClick={toggleTotalMode}
+         trailing={
+            <UserMenu
+              onLogout={logout}
+              onAccountDeleted={logout}
+              budgetStatus={budget.active?.status ?? null}
+              onOpenBudget={openBudget}
+              onOpenInsight={openInsight}
+            />
+          }
+       />
 
       <UpdateBanner />
 
@@ -1431,6 +1516,11 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           onRemove={handleBudgetRemove}
           series={budget.series}
           seriesLoading={budget.seriesLoading}
+          budgetTodayMode={budgetTodayMode}
+          onToggleBudgetTodayMode={toggleBudgetTodayMode}
+          budgetTodaySpentFair={budgetFairTotal}
+          budgetTodayLoading={budgetFairLoading}
+          budgetTodayFairFallback={budgetTodayFairFallback}
         />
       ) : isInsight ? (
         <InsightScreen

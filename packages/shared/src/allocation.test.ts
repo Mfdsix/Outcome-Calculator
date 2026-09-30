@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   allocateAmount,
+  allocationAwareTotal,
   allocationWindow,
   distributeAllocation,
   expenseEffectiveAmount,
+  fairPeriodRange,
+  fairTotalForPeriod,
   type AllocationType,
   type AllocationWindow,
 } from "./allocation";
-import { getZonedParts, zonedWallTimeToUtc } from "./periods";
+import { addCivilDays, getZonedParts, zonedWallTimeToUtc } from "./periods";
 
 const TZ = "Asia/Jakarta";
 
@@ -198,5 +201,119 @@ describe("allocateAmount", () => {
       to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 20 }),
     };
     expect(allocateAmount(700_000, "WEEKLY", "2026-09-17T10:00:00+07:00", period, TZ)).toBe(200_000);
+  });
+});
+
+describe("fairPeriodRange", () => {
+  it("caps `to` at tomorrow 00:00 Jakarta when period.to is in the future", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00"); // today 14:00
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 11 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 20 }),
+    };
+    const range = fairPeriodRange(period, TZ, now);
+    const toParts = getZonedParts(range.to, TZ);
+    expect(toParts.year).toBe(2026);
+    expect(toParts.month).toBe(9);
+    expect(toParts.day).toBe(18);
+  });
+
+  it("keeps `to` unchanged when it is already before tomorrow", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 16 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 17 }),
+    };
+    const range = fairPeriodRange(period, TZ, now);
+    expect(range.to.getTime()).toBe(period.to.getTime());
+  });
+
+  it("keeps `from` unchanged", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 10 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+    };
+    const range = fairPeriodRange(period, TZ, now);
+    expect(range.from.getTime()).toBe(period.from.getTime());
+  });
+});
+
+describe("fairTotalForPeriod", () => {
+  it("NONE in-period + WEEKLY 700k day1→100k + MONTHLY 300k day1→10k = 160000", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00"); // today
+    const expenses = [
+      { amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00", allocationType: "NONE" as AllocationType },
+      { amount: 700_000, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+      { amount: 300_000, occurredAt: "2026-09-17T08:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    // Period: today (day)
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 17 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+    };
+    expect(fairTotalForPeriod(expenses, period, TZ, now)).toBe(160_000);
+  });
+
+  it("MONTHLY expense 10 days ago still contributes 10k to today's fair total (tail overlaps)", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    // Monthly expense started 10 days ago (Sep 7), 300k → 10k per day
+    const expenses = [
+      { amount: 300_000, occurredAt: "2026-09-07T10:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 17 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+    };
+    // Today is day 11 of the window → 10k effective for today
+    expect(fairTotalForPeriod(expenses, period, TZ, now)).toBe(10_000);
+  });
+
+  it("future-tail MONTHLY expense does not leak to today's fair total (window not yet started)", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    // Monthly expense created today → window starts today, today is day 1 → 10k
+    const expenses = [
+      { amount: 300_000, occurredAt: "2026-09-17T08:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 17 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+    };
+    expect(fairTotalForPeriod(expenses, period, TZ, now)).toBe(10_000);
+  });
+
+  it("caps at tomorrow midnight — no future days counted even for long WEEKLY window", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    // WEEKLY 700k started today → day 1 = 100k, but period.to is far future
+    const expenses = [
+      { amount: 700_000, occurredAt: "2026-09-17T08:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+    ];
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 11 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 30 }),
+    };
+    // Fair window: [Sep 11, Sep 18) (capped at tomorrow). WEEKLY started Sep 17.
+    // Days 17 = day 1 (100k). Days 11-16 = 0 for this expense.
+    expect(fairTotalForPeriod(expenses, period, TZ, now)).toBe(100_000);
+  });
+});
+
+describe("allocationAwareTotal with expanded range", () => {
+  it("sums ALL expenses across an expanded range correctly (raw sum not applied)", () => {
+    const expenses = [
+      { amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00", allocationType: "NONE" as AllocationType },
+      { amount: 700_000, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+      { amount: 300_000, occurredAt: "2026-09-07T08:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    const period = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 7 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+    };
+    // NONE: 50k (day 17) + 0 (day 7 is NONE at Sep 7, in period → 0 from day 17 expense... actually)
+    // Let's just check: NONE expense is at Sep 17 → in [Sep7, Sep18) → 50k
+    // WEEKLY 700k at Sep 17 → window Sep17-24. Overlap with [Sep7, Sep18): day 17 only → 100k
+    // MONTHLY 300k at Sep 7 → window Sep7-Oct7. Overlap with [Sep7, Sep18): days 7-17 = 11 days → 11 * 10k = 110k
+    const result = allocationAwareTotal(expenses, period, TZ);
+    expect(result).toBe(50_000 + 100_000 + 110_000);
   });
 });
