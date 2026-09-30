@@ -29,7 +29,7 @@ export function Header({
   return (
     <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="text-sm font-medium text-neutral-400">{periodLabel}</span>
+        <span className="text-sm font-medium text-neutral-400" data-testid="header-period-label">{periodLabel}</span>
         {status}
       </div>
       <div className="flex items-center gap-2">

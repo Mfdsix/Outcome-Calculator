@@ -5,6 +5,8 @@ import {
   getZonedParts,
   formatDateShort,
   formatTimeShort,
+  addCivilDays,
+  zonedWallTimeToUtc,
 } from "@expense-app/shared";
 import type { AllocationType, ExpenseDto } from "@expense-app/shared";
 
@@ -33,6 +35,7 @@ import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
 import { useFairTotal } from "../hooks/useFairTotal";
+import { useFairDayTotal } from "../hooks/useFairDayTotal";
 import { useInsights } from "../hooks/useInsights";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
@@ -47,7 +50,7 @@ import {
   setAuthToken,
 } from "../lib/api";
 import { expensesRepository } from "../lib/repository";
-import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "../lib/chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets, hourlyBucketsForDay, twoDayBuckets } from "../lib/chart";
 import { formatIDR, formatIDRAbbreviated, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
@@ -64,6 +67,32 @@ const LAST_VISIT_KEY = "expense-app.last-visit";
 /** Civil day key (YYYY-MM-DD) from zoned parts, in APP_TIMEZONE semantics. */
 function dayKeyOf(parts: { year: number; month: number; day: number }): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/** Parse "YYYY-MM-DD" into a civil date parts object, with validation. */
+function parseDayKey(dayKey: string): { year: number; month: number; day: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null;
+  const parts = dayKey.split("-").map(Number);
+  const [year, month, day] = parts as [number, number, number];
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+  return { year, month, day };
+}
+
+/** Civil day start (00:00 Jakarta) as UTC instant for a YYYY-MM-DD key. */
+function dayRangeFromKey(dayKey: string): Date | null {
+  const civil = parseDayKey(dayKey);
+  if (!civil) return null;
+  const { year, month, day } = civil;
+  return zonedWallTimeToUtc(APP_TIMEZONE, { year, month, day });
+}
+
+/** Civil day end (next day 00:00 Jakarta) as UTC instant for a YYYY-MM-DD key. */
+function addDayRangeFromKey(dayKey: string): Date | null {
+  const civil = parseDayKey(dayKey);
+  if (!civil) return null;
+  const { year, month, day } = civil;
+  const next = addCivilDays({ year, month, day }, 1);
+  return zonedWallTimeToUtc(APP_TIMEZONE, next);
 }
 
 /** Base64url decode (JWT payload segments). */
@@ -355,33 +384,11 @@ function AppBody({ logout }: { logout: () => void }) {
      fairRefreshKey,
      new Date(),
      { peek: period === "day" },
-   );
+    );
 
-   /** Display total + label: fair when active (with raw fallback), else raw. */
-   const displayTotal = useMemo(() => {
-     if (totalMode === "fair" && fairTotal !== null) return fairTotal;
-     return total;
-   }, [totalMode, fairTotal, total]);
-   const displayLabel = formatIDRAbbreviated(displayTotal);
-   const isFairFallback = totalMode === "fair" && fairTotal === null;
-
-   /** Has any expense in the current period carry an allocation? (day list only) */
-   const hasAllocatedInDay = useMemo(() => {
-     if (period !== "day") return fairHasAllocated;
-     const { from, to } = currentPeriodRange("day", new Date());
-     const fromMs = from.getTime();
-     const toMs = to.getTime();
-     return expenses.some(
-       (e) => e.allocationType && e.allocationType !== "NONE" &&
-         new Date(e.occurredAt).getTime() >= fromMs && new Date(e.occurredAt).getTime() < toMs,
-     );
-   }, [period, expenses, fairHasAllocated]);
-
-   const fairDiffers = fairTotal !== null && fairTotal !== total;
-
-   /** The D total itself is clickable (dotted underline) when a fair value exists. */
-   const totalClickable = !isBudget && !isInsight && period === "day" &&
-     (totalMode === "fair" || hasAllocatedInDay || fairDiffers);
+    // --- Focused-day (W/M browse selection) totals + clickability ----------------
+    // (declared here for ordering; actual computation depends on focusedDayKey
+    //  which is defined later — see the `inDrill` block below)
 
   const calc = useCalculator();
   const budget = useBudget();
@@ -405,6 +412,12 @@ function AppBody({ logout }: { logout: () => void }) {
   const [pendingUpdate, setPendingUpdate] = useState<{ id: string; amount: number } | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [drillDayKey, setDrillDayKey] = useState<string | null>(null);
+  /** True when the user explicitly clicked/tapped a W/M summary row (vs.
+   * auto-selection seeding the highlight). Used to gate focused-day scope. */
+  const [userExplicitlySelected, setUserExplicitlySelected] = useState(false);
+  /** When focused, tracks which hour bar the user clicked so the chart
+   * can highlight it without changing selectedKey (day-key domain). */
+  const [focusedHourKey, setFocusedHourKey] = useState<string | null>(null);
   const [editOrigin, setEditOrigin] = useState<EditOrigin | null>(null);
   const [editOriginal, setEditOriginal] = useState<ExpenseDto | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
@@ -505,6 +518,103 @@ function AppBody({ logout }: { logout: () => void }) {
   }, [wmOfflineRejected, showError]);
 
   const inDrill = specialPanel === "drill";
+
+  /**
+   * Focused-day scope (spec §Adv-5 Phase 2): when browsing a W/M summary and a
+   * day row is selected (but we're NOT in drill), the header total, period
+   * label, and chart all narrow to that single civil day:
+   *   - focusedDayKey = selectedKey.slice(0,10)  (YYYY-MM-DD)
+   *   - header total = that day's raw/fair total
+   *   - chart = hourly buckets for that day (same as mode D)
+   * Falls back to full W/M behavior when selectedKey is null or we're drilling.
+   */
+  const focusedDayKey =
+    isSpecial && !inDrill && userExplicitlySelected && (period === "week" || period === "month") && selectedKey !== null
+      ? selectedKey.slice(0, 10)
+      : null;
+
+  /** Current time reference for relative day labels (recomputed each render). */
+  const now = useMemo(() => new Date(), []);
+
+  const focusedFairRefreshKey = useMemo(
+    () => `focused-day:${totalMode}:${focusedDayKey ?? "none"}:${fairExpensesSignature}`,
+    [totalMode, focusedDayKey, fairExpensesSignature],
+  );
+
+  const {
+    fairTotal: focusedFairTotal,
+    fairLoading: focusedFairLoading,
+    hasAllocated: focusedHasAllocated,
+  } = useFairDayTotal(focusedDayKey, totalMode, optimisticExpenses, focusedFairRefreshKey, now);
+
+  // --- Focused-day (W/M browse selection) totals -------------------------------
+  /** Raw total for the selected civil day (Jakarta), from the live expenses list. */
+   const selectedDayRawTotal = useMemo(() => {
+     if (!focusedDayKey) return 0;
+     const from = dayRangeFromKey(focusedDayKey);
+     const to = addDayRangeFromKey(focusedDayKey);
+     if (!from || !to) return 0;
+     const fromMs = from.getTime();
+     const toMs = to.getTime();
+     return expenses.reduce((sum, item) => {
+       const t = new Date(item.occurredAt).getTime();
+       return t >= fromMs && t < toMs ? sum + item.amount : sum;
+     }, 0);
+   }, [focusedDayKey, expenses]);
+
+  /** Has any expense in the focused day carry an allocation (for toggle clickability). */
+  const hasAllocatedSelectedDay = useMemo(() => {
+    if (!focusedDayKey) return false;
+    const from = dayRangeFromKey(focusedDayKey);
+    const to = addDayRangeFromKey(focusedDayKey);
+    if (!from || !to) return false;
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    return expenses.some(
+      (e) => e.allocationType && e.allocationType !== "NONE" &&
+        new Date(e.occurredAt).getTime() >= fromMs && new Date(e.occurredAt).getTime() < toMs,
+    );
+  }, [focusedDayKey, expenses]);
+
+  const focusedFairDiffers = focusedFairTotal !== null && focusedFairTotal !== selectedDayRawTotal;
+
+  // --- D-only helpers (used for D mode total + clickability) --------------------
+  /** Has any expense in the current period carry an allocation? (day list only) */
+  const hasAllocatedInDay = useMemo(() => {
+    if (period !== "day") return fairHasAllocated;
+    const { from, to } = currentPeriodRange("day", new Date());
+    const fromMs = from.getTime();
+    const toMs = to.getTime();
+    return expenses.some(
+      (e) => e.allocationType && e.allocationType !== "NONE" &&
+        new Date(e.occurredAt).getTime() >= fromMs && new Date(e.occurredAt).getTime() < toMs,
+    );
+  }, [period, expenses, fairHasAllocated]);
+
+  const fairDiffers = fairTotal !== null && fairTotal !== total;
+
+  /** The D total itself is clickable (dotted underline) when a fair value exists. */
+  const totalClickable = !isBudget && !isInsight && period === "day" &&
+    (totalMode === "fair" || hasAllocatedInDay || fairDiffers);
+
+  // --- Extended clickability: W/M focused day has the same toggle rules as D ---
+  const totalClickableFocused = !isBudget && !isInsight && focusedDayKey !== null &&
+    (totalMode === "fair" || hasAllocatedSelectedDay || focusedFairDiffers);
+
+  const totalClickableExtended = totalClickable || totalClickableFocused;
+
+  // --- Display total + label ----------------------------------------------------
+  /** Display total + label: fair when active (with raw fallback), else raw. */
+  const displayTotal = useMemo(() => {
+    if (focusedDayKey !== null) {
+      if (totalMode === "fair" && focusedFairTotal !== null) return focusedFairTotal;
+      return selectedDayRawTotal;
+    }
+    if (totalMode === "fair" && fairTotal !== null) return fairTotal;
+    return total;
+  }, [totalMode, focusedFairTotal, selectedDayRawTotal, focusedDayKey, fairTotal, total]);
+  const displayLabel = formatIDRAbbreviated(displayTotal);
+  const isFairFallback = totalMode === "fair" && (focusedDayKey !== null ? focusedFairTotal === null : fairTotal === null);
 
   const doFlash = useCallback(() => {
     setFlash(true);
@@ -909,13 +1019,19 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 // --- Special-mode data -------------------------------------------------------
 
   const chartBuckets = useMemo(
-    () =>
-      period === "day"
-        ? hourlyBuckets(expenses, new Date())
-        : period === "week"
-          ? dailyBuckets(period, currentPeriodRange(period), expenses, new Date())
-          : twoDayBuckets(currentPeriodRange(period), expenses, new Date()),
-    [period, expenses],
+    () => {
+      if (focusedDayKey !== null) {
+        return hourlyBucketsForDay(expenses, focusedDayKey, now);
+      }
+      if (period === "day") {
+        return hourlyBuckets(expenses, new Date());
+      }
+      if (period === "week") {
+        return dailyBuckets(period, currentPeriodRange(period), expenses, new Date());
+      }
+      return twoDayBuckets(currentPeriodRange(period), expenses, new Date());
+    },
+    [period, expenses, focusedDayKey, now],
   );
 
   const budgetSnapshot = useBudgetSnapshot(period, expenses, budget.active);
@@ -926,28 +1042,43 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
    * drill) it is an expense id — derive the matching hour/day bucket so the
    * chart stays in sync without mixing id domains.
    */
-  const chartSelectedKey = useMemo(() => {
-    if (inDrill) {
-      // Highlight the day being drilled.
-      return drillDayKey;
-    }
-    if (period === "day") {
-      const tx = expenses.find((item) => item.id === selectedKey);
-      if (!tx) return selectedKey; // no selection yet — let BarChart fall back to current hour
-      const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
-      return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
-    }
-    if (period === "month") {
-      // The list selects days but the chart shows pairs — highlight the pair
-      // containing the selected day (or the pair itself as fallback).
-      const pair = selectedKey
-        ? chartBuckets.find((bucket) => bucket.key === selectedKey || bucket.endKey === selectedKey)
-        : undefined;
-      return pair?.key ?? selectedKey;
-    }
-    // W: selectedKey is already a bucket (day) key.
-    return selectedKey;
-  }, [inDrill, period, selectedKey, expenses, drillDayKey, chartBuckets]);
+    const chartSelectedKey = useMemo(() => {
+      if (inDrill) {
+        // Highlight the day being drilled.
+        return drillDayKey;
+      }
+      if (focusedDayKey !== null) {
+        // Focused-day hourly chart: highlight the clicked hour if any,
+        // else the hour of the first transaction on focusedDayKey,
+        // else fall back to the current hour.
+        if (focusedHourKey) return focusedHourKey;
+        const tx = expenses.find(
+          (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === focusedDayKey,
+        );
+        if (tx) {
+          const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
+          return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
+        }
+        const parts = getZonedParts(now, APP_TIMEZONE);
+        return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
+      }
+     if (period === "day") {
+       const tx = expenses.find((item) => item.id === selectedKey);
+       if (!tx) return selectedKey; // no selection yet — let BarChart fall back to current hour
+       const parts = getZonedParts(new Date(tx.occurredAt), APP_TIMEZONE);
+       return `${dayKeyOf(parts)}T${String(parts.hour).padStart(2, "0")}`;
+     }
+     if (period === "month") {
+       // The list selects days but the chart shows pairs — highlight the pair
+       // containing the selected day (or the pair itself as fallback).
+       const pair = selectedKey
+         ? chartBuckets.find((bucket) => bucket.key === selectedKey || bucket.endKey === selectedKey)
+         : undefined;
+       return pair?.key ?? selectedKey;
+     }
+     // W: selectedKey is already a bucket (day) key.
+     return selectedKey;
+    }, [inDrill, focusedDayKey, focusedHourKey, period, selectedKey, expenses, drillDayKey, chartBuckets, now]);
 
   /**
    * Day keys for W/M summary navigation, in the same descending order the sparse
@@ -985,10 +1116,17 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     [expenses, selectedKey, setSelectedKey],
   );
 
-  const handleNavigate = useCallback(
-    (direction: "up" | "down" | "left" | "right") => {
-      switch (direction) {
-        case "left": {
+   const handleNavigate = useCallback(
+     (direction: "up" | "down" | "left" | "right") => {
+       switch (direction) {
+         case "left": {
+           if (focusedDayKey !== null) {
+             // In focused-day mode, left exits the focus back to full W/M view.
+             setSelectedKey(null);
+             setUserExplicitlySelected(false);
+             setFocusedHourKey(null);
+             return;
+           }
           if (period === "day" && !inDrill) return;
           openHistory(period === "week" ? "day" : "week");
           return;
@@ -1008,17 +1146,21 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
              moveTransactionSelection(direction);
              return;
            }
-            const keys = navDayKeys;
-            if (keys.length === 0) return;
-           const index = keys.indexOf(selectedKey ?? "");
-           const valid = index < 0 ? 0 : index;
-           const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
-           setSelectedKey(keys[next] ?? null);
-           return;
+          const keys = navDayKeys;
+             if (keys.length === 0) return;
+            const index = keys.indexOf(selectedKey ?? "");
+            const valid = index < 0 ? 0 : index;
+            const next = direction === "up" ? Math.max(0, valid - 1) : Math.min(keys.length - 1, valid + 1);
+            setSelectedKey(keys[next] ?? null);
+            // Keep focused-day scope active when navigating days in W/M summary.
+            if (isSpecial && (period === "week" || period === "month")) {
+              setUserExplicitlySelected(true);
+            }
+            return;
          }
        }
      },
-     [openHistory, period, inDrill, moveTransactionSelection, navDayKeys, selectedKey, setSelectedKey],
+      [openHistory, period, inDrill, focusedDayKey, moveTransactionSelection, navDayKeys, selectedKey, setSelectedKey, setUserExplicitlySelected, isSpecial],
    );
 
   const navDisabled = useMemo<Partial<Record<"up" | "down" | "left" | "right", boolean>>>(() => {
@@ -1031,8 +1173,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       return {
         up: true,
         down: true,
-        left: period === "day" && !inDrill,
-        right: period === "month" && !inDrill,
+        left: focusedDayKey !== null ? false : (period === "day" && !inDrill),
+        right: period === "month" && !inDrill && focusedDayKey === null,
       };
     }
     const idx = domainKeys.indexOf(selectedKey ?? "");
@@ -1042,10 +1184,10 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return {
       up: valid === 0,
       down: valid === last,
-      left: period === "day" && !inDrill,
-      right: period === "month" && !inDrill,
+      left: focusedDayKey !== null ? false : (period === "day" && !inDrill),
+      right: period === "month" && !inDrill && focusedDayKey === null,
     };
-  }, [inDrill, period, expenses, chartBuckets, navDayKeys, selectedKey]);
+  }, [inDrill, period, focusedDayKey, expenses, navDayKeys, selectedKey]);
 
   const handleEdit = useCallback(() => {
     const id = inDrill ? transactionKey : selectedKey;
@@ -1058,6 +1200,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, closeHistory, transactionKey]);
 
   const handleSpecialEnter = useCallback(() => {
+    // Focused-day mode (W/M + day selected): drill into the focused day.
+    if (focusedDayKey !== null) {
+      setDrillDayKey(focusedDayKey);
+      enterDrill();
+      return;
+    }
     // Drill / day-summary: Enter edits the selected transaction directly.
     if (inDrill || period === "day") {
       handleEdit();
@@ -1083,7 +1231,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       setDrillDayKey(target.slice(0, 10));
       enterDrill();
     }
-  }, [chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey]);
+  }, [focusedDayKey, chartBuckets, enterDrill, handleEdit, inDrill, period, selectedKey]);
 
   const confirmDelete = useCallback(async () => {
     const id = deleteTarget;
@@ -1261,39 +1409,48 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     closeInsight,
   ]);
 
-  /** Clicking a chart bar: in day mode resolve to the first transaction in
-   * that hour bucket (selections stay in the transaction-id domain); in month
-   * mode resolve the pair to a day with transactions (the list stays daily);
-   * otherwise the bucket key is the selection directly. */
-  const handleBarSelect = useCallback(
-    (key: string) => {
-      if (period === "day" && !inDrill) {
-        const hourKey = key.slice(11, 13);
-        const tx = expenses.find((item) => {
-          const parts = getZonedParts(new Date(item.occurredAt), APP_TIMEZONE);
-          return String(parts.hour).padStart(2, "0") === hourKey;
-        });
-        if (tx) {
-          setSelectedKey(tx.id);
+   /** Clicking a chart bar: in day mode resolve to the first transaction in
+    * that hour bucket (selections stay in the transaction-id domain); in month
+    * mode resolve the pair to a day with transactions (the list stays daily);
+    * otherwise the bucket key is the selection directly.
+    * In focused-day mode (W/M + day selected), clicking a bar does NOT change
+    * selectedKey (which is a day-key) — it only updates the highlighted hour
+    * via chartSelectedKey. Navigation stays via the SummaryList/up-down. */
+    const handleBarSelect = useCallback(
+      (key: string) => {
+        // Focused-day mode: bar click is highlight-only — track the hour key
+        // without changing selectedKey (day-key domain).
+        if (focusedDayKey !== null) {
+          setFocusedHourKey(key);
           return;
         }
-      }
-      if (period === "month" && !inDrill) {
-        const pair = chartBuckets.find((bucket) => bucket.key === key);
-        if (pair) {
-          const hasTx = (dayKey: string): boolean =>
-            expenses.some(
-              (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey,
-            );
-          // Prefer the pair start so Enter drills from a stable anchor.
-          setSelectedKey(hasTx(pair.key) ? pair.key : (pair.endKey ?? pair.key));
-          return;
+        if (period === "day" && !inDrill) {
+          const hourKey = key.slice(11, 13);
+          const tx = expenses.find((item) => {
+            const parts = getZonedParts(new Date(item.occurredAt), APP_TIMEZONE);
+            return String(parts.hour).padStart(2, "0") === hourKey;
+          });
+          if (tx) {
+            setSelectedKey(tx.id);
+            return;
+          }
         }
-      }
-      setSelectedKey(key);
-    },
-    [period, inDrill, expenses, chartBuckets, setSelectedKey],
-  );
+        if (period === "month" && !inDrill) {
+          const pair = chartBuckets.find((bucket) => bucket.key === key);
+          if (pair) {
+            const hasTx = (dayKey: string): boolean =>
+              expenses.some(
+                (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === dayKey,
+              );
+            // Prefer the pair start so Enter drills from a stable anchor.
+            setSelectedKey(hasTx(pair.key) ? pair.key : (pair.endKey ?? pair.key));
+            return;
+          }
+        }
+        setSelectedKey(key);
+      },
+      [focusedDayKey, period, inDrill, expenses, chartBuckets, setSelectedKey, setFocusedHourKey],
+    );
 
   // --- Derived rows --------------------------------------------------------------
 
@@ -1339,9 +1496,6 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return startMon === endMon ? `${startDay}–${endDay} ${startMon}` : `${startLabel}–${endLabel}`;
   };
 
-  /** Current time reference for relative day labels (recomputed each render). */
-  const now = useMemo(() => new Date(), []);
-
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
@@ -1375,25 +1529,30 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
    *    visible; fall back to today's chart day, then the first bucket.
    *  Selection is (re)seeded on entry/refresh; navigation keeps it within the
    *  bucket set so it isn't clobbered here. */
-  useEffect(() => {
-    if (expenses.length === 0) return;
-    if (inDrill || period === "day") {
-      if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
-        setSelectedKey(expenses[0]?.id ?? null);
-      }
-      return;
-    }
-    const seed =
-      summaryRows[0]?.key ??
-      chartBuckets.find((bucket) => bucket.isCurrent)?.key ??
-      chartBuckets[0]?.key ??
-      null;
-    // Drop a selection that is no longer present in the rendered (sparse) list
-    // — avoids a stale key that highlights a bar but no SummaryList row.
-    if (selectedKey === null || !summaryRows.some((row) => row.key === selectedKey)) {
-      setSelectedKey(seed);
-    }
-  }, [expenses, inDrill, period, selectedKey, chartBuckets, summaryRows, setSelectedKey]);
+   useEffect(() => {
+     if (expenses.length === 0) return;
+     if (inDrill || period === "day") {
+       if (selectedKey === null || !expenses.some((item) => item.id === selectedKey)) {
+         setSelectedKey(expenses[0]?.id ?? null);
+       }
+       return;
+     }
+      // W/M summary: auto-seed selection but do NOT activate focused-day scope
+      // (that requires an explicit user click on a SummaryList row).
+      const seed =
+       summaryRows[0]?.key ??
+       chartBuckets.find((bucket) => bucket.isCurrent)?.key ??
+       chartBuckets[0]?.key ??
+       null;
+     // Drop a selection that is no longer present in the rendered (sparse) list
+     // — avoids a stale key that highlights a bar but no SummaryList row.
+     if (selectedKey === null || !summaryRows.some((row) => row.key === selectedKey)) {
+       // Only reset focused-day scope when we're (re)seeding an auto-selection,
+       // not when the user explicitly clicked a row.
+       setUserExplicitlySelected(false);
+       setSelectedKey(seed);
+     }
+    }, [expenses, inDrill, period, selectedKey, chartBuckets, summaryRows, setSelectedKey]);
 
   const drillDayTotal = useMemo(
     () =>
@@ -1408,25 +1567,37 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     [inDrill, drillDayKey, drillPairEndKey, expenses],
   );
 
-  const chartTitle = useMemo(() => {
-    if (inDrill && drillDayKey) {
-      const datePart =
-        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
-      return `${relativeDayLabel(drillDayKey, now)} · ${datePart} · ${groupDigits(String(drillDayTotal))}`;
-    }
-    // Day hourly chart: the header already anchors to "Per jam" — the Today/total
-    // subtitle is redundant, so we leave it blank here.
-    return "";
-  }, [inDrill, drillDayKey, period, now, expenses, drillDayTotal]);
+   const chartTitle = useMemo(() => {
+     if (inDrill && drillDayKey) {
+       const datePart =
+         period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+       return `${relativeDayLabel(drillDayKey, now)} · ${datePart} · ${groupDigits(String(drillDayTotal))}`;
+     }
+     if (focusedDayKey !== null) {
+       // W/M focused day: show the total for that single day (consistent with D drill).
+       const dayTotal = expenses
+         .filter(
+           (item) => dayKeyOf(getZonedParts(new Date(item.occurredAt), APP_TIMEZONE)) === focusedDayKey,
+         )
+         .reduce((sum, item) => sum + item.amount, 0);
+       return `${relativeDayLabel(focusedDayKey, now)} · ${dateLabelFromKey(focusedDayKey)} · ${groupDigits(String(dayTotal))}`;
+     }
+     // Day hourly chart: the header already anchors to "Per jam" — the Today/total
+     // subtitle is redundant, so we leave it blank here.
+     return "";
+   }, [inDrill, drillDayKey, focusedDayKey, period, now, expenses, drillDayTotal]);
 
-  const effectivePeriodLabel = useMemo(() => {
-    if (inDrill && drillDayKey) {
-      const datePart =
-        period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
-      return `${relativeDayLabel(drillDayKey, now)} · ${datePart}`;
-    }
-    return periodLabel;
-  }, [inDrill, drillDayKey, period, now, summaryRows, selectedKey, periodLabel]);
+   const effectivePeriodLabel = useMemo(() => {
+     if (inDrill && drillDayKey) {
+       const datePart =
+         period === "month" ? pairMidLabel(drillDayKey, drillPairEndKey ?? undefined) : dateLabelFromKey(drillDayKey);
+       return `${relativeDayLabel(drillDayKey, now)} · ${datePart}`;
+     }
+      if (focusedDayKey !== null) {
+        return `${relativeDayLabel(focusedDayKey, now)} · ${dateLabelFromKey(focusedDayKey)}`;
+      }
+      return periodLabel;
+    }, [inDrill, drillDayKey, focusedDayKey, period, now, summaryRows, selectedKey, periodLabel]);
 
   const deleteLabel = (() => {
     const expense = expenses.find((item) => item.id === deleteTarget);
@@ -1441,9 +1612,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
          status={
            <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
          }
-         totalClickable={totalClickable}
+         totalClickable={totalClickableExtended}
          totalFairActive={totalMode === "fair"}
-         totalLoading={fairLoading}
+          totalLoading={focusedDayKey !== null ? focusedFairLoading : fairLoading}
          onTotalClick={toggleTotalMode}
          trailing={
             <UserMenu
@@ -1540,11 +1711,16 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               onSelect={(key) => setSelectedKey(key)}
             />
           ) : (
-            <SummaryList
-              rows={summaryRows}
-              selectedKey={selectedKey}
-              onSelect={(key) => setSelectedKey(key)}
-            />
+             <SummaryList
+               rows={summaryRows}
+               selectedKey={selectedKey}
+               onSelect={(key) => {
+                 setSelectedKey(key);
+                 if (isSpecial && !inDrill && (period === "week" || period === "month")) {
+                   setUserExplicitlySelected(true);
+                 }
+               }}
+             />
           )}
 
           <div className="shrink-0">

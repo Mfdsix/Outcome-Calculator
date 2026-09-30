@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getZonedParts, last30DaysRange, last7DaysRange } from "@expense-app/shared";
 
-import { dailyBuckets, groupExpensesByDay, hourlyBuckets, twoDayBuckets } from "./chart";
+import { dailyBuckets, groupExpensesByDay, hourlyBuckets, hourlyBucketsForDay, twoDayBuckets } from "./chart";
 import { APP_TIMEZONE } from "./periods";
 
 describe("groupExpensesByDay", () => {
@@ -263,6 +263,36 @@ describe("dailyBuckets — ignores allocation type (raw sums as-is)", () => {
     // 50k + 700k in full = 750k.
     expect(dayBucket).toBeTruthy();
     expect(dayBucket!.total).toBe(750_000);
+  });
+});
+
+describe("hourlyBucketsForDay — arbitrary civil day", () => {
+  it("buckets only today's-keyed expenses into 24 hourly bars", () => {
+    const expenses = [
+      { id: "a", amount: 30_000, occurredAt: "2026-09-17T10:00:00+07:00" },
+      { id: "b", amount: 20_000, occurredAt: "2026-09-17T14:00:00+07:00" },
+      { id: "c", amount: 99_000, occurredAt: "2026-09-15T14:00:00+07:00" }, // different day — ignored
+    ];
+    const buckets = hourlyBucketsForDay(expenses, "2026-09-17");
+    expect(buckets).toHaveLength(24);
+    expect(buckets[10]!.total).toBe(30_000);
+    expect(buckets[14]!.total).toBe(20_000);
+    expect(buckets[0]!.total).toBe(0);
+    expect(buckets.every((b) => b.key.startsWith("2026-09-17T"))).toBe(true);
+    expect(buckets.every((b) => b.kind === "hour")).toBe(true);
+  });
+
+  it("marks the current hour only when dayKey is today", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const buckets = hourlyBucketsForDay([], "2026-09-17", now);
+    expect(buckets[14]!.isCurrent).toBe(true);
+    expect(buckets[10]!.isCurrent).toBe(false);
+  });
+
+  it("marks no hour current for a past day", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const buckets = hourlyBucketsForDay([], "2026-09-15", now);
+    expect(buckets.every((b) => b.isCurrent === false)).toBe(true);
   });
 });
 

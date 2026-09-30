@@ -106,6 +106,42 @@ export function hourlyBuckets(
 }
 
 /**
+ * Aggregate expenses into 24 hourly buckets for an arbitrary civil day
+ * identified by `dayKey` (YYYY-MM-DD, in APP_TIMEZONE). Same raw-sum semantics
+ * as hourlyBuckets: each expense counts once in full at its actual hour, only
+ * if its occurredAt civil day matches `dayKey`. `currentHour`/`isCurrent`
+ * resolve from `now` (the real-time clock) when `dayKey` is today — otherwise
+ * no hour is marked current. Pure; safe to unit-test.
+ */
+export function hourlyBucketsForDay(
+  expenses: ExpenseDto[],
+  dayKey: string,
+  now: Date = new Date(),
+): ChartBucket[] {
+  const totals = new Array(24).fill(0);
+  for (const expense of expenses) {
+    const parts = getZonedParts(new Date(expense.occurredAt), APP_TIMEZONE);
+    const key = civilKey(parts.year, parts.month, parts.day);
+    if (key === dayKey && parts.hour >= 0 && parts.hour < 24) {
+      totals[parts.hour] += expense.amount;
+    }
+  }
+
+  const nowParts = getZonedParts(now, APP_TIMEZONE);
+  const todayKey = civilKey(nowParts.year, nowParts.month, nowParts.day);
+  const isToday = dayKey === todayKey;
+  const currentHour = isToday ? nowParts.hour : -1;
+
+  return totals.map((total, hour) => ({
+    key: `${dayKey}T${String(hour).padStart(2, "0")}`,
+    label: hour % 3 === 0 ? String(hour).padStart(2, "0") : "",
+    total,
+    isCurrent: isToday && hour === currentHour,
+    kind: "hour" as const,
+  }));
+}
+
+/**
  * Sparse per-day aggregation for the W/M summary list — only days that
  * actually have expenses appear (no zero rows). Raw sums as-is per occurredAt
  * day; allocation never affects D/W/M totals.
