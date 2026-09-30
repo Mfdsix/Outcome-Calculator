@@ -151,8 +151,11 @@ describe("useFairDayTotal", () => {
       });
     });
 
+    // Stable array identity (see useFairTotal abort test): an inline `[]`
+    // would retrigger the fetch effect on every render.
+    const stableOptimistic: [] = [];
     const { result, rerender } = renderHook(
-      ({ dayKey }: { dayKey: string }) => useFairDayTotal(dayKey, "fair", [], undefined, FROZEN_NOW),
+      ({ dayKey }: { dayKey: string }) => useFairDayTotal(dayKey, "fair", stableOptimistic, undefined, FROZEN_NOW),
       { initialProps: { dayKey: "2026-09-17" } },
     );
 

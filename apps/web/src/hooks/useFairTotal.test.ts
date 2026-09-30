@@ -125,8 +125,12 @@ describe("useFairTotal", () => {
       });
     });
 
+    // Stable array identity: an inline `[]` would give fetchFair a new
+    // identity every render and trigger a refetch loop, making the
+    // loading assertion race with microsecond-false windows.
+    const stableOptimistic: [] = [];
     const { result, rerender } = renderHook(
-      ({ period }: { period: Period }) => useFairTotal(period, "fair" as const, [], undefined, FROZEN_NOW),
+      ({ period }: { period: Period }) => useFairTotal(period, "fair" as const, stableOptimistic, undefined, FROZEN_NOW),
       { initialProps: { period: "day" } },
     );
 

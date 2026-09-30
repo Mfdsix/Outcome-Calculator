@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { fairTotalForPeriod, getZonedParts, zonedWallTimeToUtc, addCivilDays, toIsoWithOffset } from "@expense-app/shared";
+import {
+  fairBreakdownForDay,
+  fairTotalForPeriod,
+  getZonedParts,
+  zonedWallTimeToUtc,
+  addCivilDays,
+  toIsoWithOffset,
+} from "@expense-app/shared";
 
 import { expensesRepository } from "../lib/repository";
 import { APP_TIMEZONE } from "../lib/periods";
 import { type ApiError, OfflineError } from "../lib/api";
 import type { ExpenseDto } from "@expense-app/shared";
+import type { FairBreakdown } from "@expense-app/shared";
 import type { PeriodRange } from "@expense-app/shared";
 import type { TotalMode } from "./useTotalMode";
 
@@ -16,6 +24,9 @@ export interface UseFairDayTotalResult {
   /** True when at least one expense in the fetched expanded range has an
    * allocationType !== "NONE". */
   hasAllocated: boolean;
+  /** Fair breakdown for the focused day (rows + total). Null when not fetched
+   * or on error/offline (caller falls back to raw). */
+  fairBreakdown: FairBreakdown | null;
 }
 
 /**
@@ -46,6 +57,7 @@ export function useFairDayTotal(
   const [fairTotal, setFairTotal] = useState<number | null>(null);
   const [fairLoading, setFairLoading] = useState(false);
   const [hasAllocated, setHasAllocated] = useState(false);
+  const [fairBreakdown, setFairBreakdown] = useState<FairBreakdown | null>(null);
 
   const inflightRef = useRef<AbortController | null>(null);
 
@@ -89,6 +101,7 @@ export function useFairDayTotal(
       setFairLoading(true);
       setFairTotal(null);
       setHasAllocated(false);
+      setFairBreakdown(null);
 
       const frozenNow = new Date(nowTimestampRef.current);
 
@@ -117,6 +130,14 @@ export function useFairDayTotal(
           const total = fairTotalForPeriod(merged, dayRange, APP_TIMEZONE, frozenNow);
           if (!Number.isFinite(total)) return;
           setFairTotal(total);
+
+          const breakdown = fairBreakdownForDay(
+            merged,
+            dayRange,
+            APP_TIMEZONE,
+            frozenNow,
+          );
+          setFairBreakdown(breakdown);
         })
         .catch((cause: unknown) => {
           if (signal.aborted) return;
@@ -147,6 +168,7 @@ export function useFairDayTotal(
       setFairTotal(null);
       setFairLoading(false);
       setHasAllocated(false);
+      setFairBreakdown(null);
       return;
     }
     const controller = new AbortController();
@@ -155,5 +177,5 @@ export function useFairDayTotal(
     return () => controller.abort();
   }, [shouldFetch, dayRange, fetchFair, refreshKey]);
 
-  return { fairTotal, fairLoading, hasAllocated };
+  return { fairTotal, fairLoading, hasAllocated, fairBreakdown };
 }

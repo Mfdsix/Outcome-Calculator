@@ -270,3 +270,78 @@ export function fairTotalForPeriod(
   const range = fairPeriodRange(period, timeZone, now);
   return allocationAwareTotal(expenses, range, timeZone);
 }
+
+export interface FairBreakdownRow {
+  id: string;
+  occurredAt: string;
+  allocationType: "WEEKLY" | "MONTHLY";
+  perDayAmount: number;
+}
+
+export interface FairBreakdown {
+  fairTotal: number;
+  rows: FairBreakdownRow[];
+}
+
+/**
+ * Breakdown of the fair total for a single civil day (`dayRange`, 1 calendar day
+ * in `timeZone`), consistent with fairTotalForPeriod (caps `to` at tomorrow 00:00
+ * civil via fairPeriodRange so the future tail does not leak).
+ *
+ * `expenses` must come from an expanded fetch (≥30 days before `dayRange.from`)
+ * so allocated expenses whose windows overlap the focused day are included.
+ *
+ * Returns the fair total + the list of *contributing* allocation rows — one row
+ * per allocated expense with a non-zero per-day contribution. Expense id is an
+ * optional caller-supplied key (falls back to index) so optimistic rows without a
+ * stable id can still be addressed by the UI.
+ *
+ * NONE expenses are excluded from `rows` (they only affect `fairTotal`); per spec
+ * the breakdown lists only allocation contributors. When fair == raw (no
+ * contributors) rows is empty and the caller shows its empty-state message.
+ * (spec §Adv-5 breakdown)
+ */
+export function fairBreakdownForDay(
+  expenses: Array<{
+    amount: number;
+    occurredAt: Date | string;
+    allocationType?: AllocationType;
+    id?: string;
+  }>,
+  dayRange: { from: Date; to: Date },
+  timeZone: string,
+  now: Date = new Date(),
+): FairBreakdown {
+  const range = fairPeriodRange(dayRange, timeZone, now);
+  const dayKey = civilKey(
+    getZonedParts(range.from, timeZone).year,
+    getZonedParts(range.from, timeZone).month,
+    getZonedParts(range.from, timeZone).day,
+  );
+
+  let fairTotal = 0;
+  const rows: FairBreakdownRow[] = [];
+
+  for (let i = 0; i < expenses.length; i += 1) {
+    const expense = expenses[i]!;
+    const type = expense.allocationType ?? "NONE";
+    if (type === "NONE") {
+      fairTotal += expenseEffectiveAmount(expense, range, timeZone);
+      continue;
+    }
+
+     const perDayMap = effectiveAllocationForDay(expense.amount, type, new Date(expense.occurredAt).toISOString(), timeZone);
+    const perDayAmount = perDayMap.get(dayKey) ?? 0;
+    if (perDayAmount > 0) {
+      fairTotal += perDayAmount;
+      rows.push({
+        id: expense.id ?? `fair-row-${i}`,
+        occurredAt: new Date(expense.occurredAt).toISOString(),
+        allocationType: type,
+        perDayAmount,
+      });
+    }
+  }
+
+  return { fairTotal, rows };
+}

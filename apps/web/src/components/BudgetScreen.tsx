@@ -20,11 +20,13 @@ import {
   formatDateShort,
 } from "@expense-app/shared";
 import type { BudgetDashboardData } from "@expense-app/shared";
+import type { FairBreakdown } from "@expense-app/shared";
 
 import { BudgetModal } from "./BudgetModal";
 import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodChart";
 import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
+import { FairInfoButton } from "./FairBreakdown";
 import type { TotalMode } from "../hooks/useTotalMode";
 import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
@@ -48,6 +50,11 @@ export interface BudgetScreenProps {
   budgetTodayLoading: boolean;
   /** True when in fair mode but the fair total is unavailable — show ·raw fallback. */
   budgetTodayFairFallback: boolean;
+  /** Fair breakdown for today (day scope); used to render the [?] info button
+   * when fair mode is active. W/M scope never passes this. */
+  budgetTodayFairBreakdown?: FairBreakdown | null;
+  /** Label for the [?] dialog title (e.g. "Rincian fair — 24 Sep"). */
+  budgetTodayFairInfoLabel?: string;
 }
 
 interface PrefillState {
@@ -76,7 +83,7 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel }: BudgetScreenProps) {
   /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
   const nowISO = useMemo(() => new Date().toISOString(), []);
@@ -226,6 +233,8 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                    todaySpentFair={budgetTodaySpentFair}
                    todayLoading={budgetTodayLoading}
                    fairFallback={budgetTodayFairFallback}
+                   fairBreakdown={budgetTodayFairBreakdown}
+                   fairInfoLabel={budgetTodayFairInfoLabel}
                  />
 
                 {/* Layer 2: Period card */}
@@ -423,7 +432,9 @@ function BudgetFinished({
 }
 
 /** Today headline: plain text normally, but a clickable button with a dotted
- *  underline when a fair value exists (click toggles raw↔fair). */
+ *  underline when a fair value exists and differs from raw (click toggles
+ *  raw↔fair). When fair mode is already active AND a breakdown is available,
+ *  the value is rendered plain (no dotted) with a [?] info button instead. */
 function BudgetTodayHeadline({
   testid,
   text,
@@ -432,6 +443,8 @@ function BudgetTodayHeadline({
   fairActive,
   loading,
   onClick,
+  fairBreakdown,
+  fairInfoLabel,
 }: {
   testid: string;
   text: string;
@@ -440,7 +453,55 @@ function BudgetTodayHeadline({
   fairActive: boolean;
   loading: boolean;
   onClick: () => void;
+  /** Fair breakdown — when present and fairActive, render plain + info button. */
+  fairBreakdown?: FairBreakdown | null;
+  fairInfoLabel?: string;
 }) {
+  const showInfo = fairActive && Boolean(fairBreakdown);
+  if (showInfo && clickable) {
+    // Fair active + breakdown: still a toggle button (click → raw) but without
+    // the dotted underline, plus a [?] info button beside it.
+    const label = fairActive ? "Kembali ke total normal" : "Tampilkan total fair";
+    return (
+      <div className="mt-1 flex items-center gap-1.5">
+        <button
+          type="button"
+          data-testid={testid}
+          aria-pressed={fairActive}
+          aria-label={label}
+          title={label}
+          onClick={onClick}
+          className={`cursor-pointer text-left ${className} ${loading ? "animate-pulse" : ""}`}
+        >
+          {text}
+        </button>
+        <FairInfoButton
+          label={fairInfoLabel ?? "Rincian fair — Hari ini"}
+          breakdown={fairBreakdown!}
+          show={true}
+        />
+      </div>
+    );
+  }
+  if (showInfo) {
+    // Fair active but not clickable (no breakdown to toggle away from): plain span + info button.
+    return (
+      <div className="mt-1 flex items-center gap-1.5">
+        <span
+          data-testid={testid}
+          className={`text-left ${className} ${loading ? "animate-pulse" : ""}`}
+        >
+          {text}
+        </span>
+        <FairInfoButton
+          label={fairInfoLabel ?? "Rincian fair — Hari ini"}
+          breakdown={fairBreakdown!}
+          show={true}
+        />
+      </div>
+    );
+  }
+  const label = fairActive ? "Kembali ke total normal" : "Tampilkan total fair";
   if (!clickable) {
     return (
       <p data-testid={testid} className={`mt-1 ${className}`}>
@@ -448,7 +509,6 @@ function BudgetTodayHeadline({
       </p>
     );
   }
-  const label = fairActive ? "Kembali ke total normal" : "Tampilkan total fair";
   return (
     <button
       type="button"
@@ -480,6 +540,8 @@ function BudgetToday({
   todaySpentFair,
   todayLoading,
   fairFallback,
+  fairBreakdown,
+  fairInfoLabel,
 }: {
   type: BudgetType;
   amount: number;
@@ -491,6 +553,8 @@ function BudgetToday({
   todaySpentFair: number | null;
   todayLoading: boolean;
   fairFallback: boolean;
+  fairBreakdown?: FairBreakdown | null;
+  fairInfoLabel?: string;
 }) {
   const isDaily = type === "daily";
   const cap = amount;
@@ -533,6 +597,8 @@ function BudgetToday({
           fairActive={todayMode === "fair"}
           loading={todayLoading}
           onClick={onToggleTodayMode}
+          fairBreakdown={fairBreakdown}
+          fairInfoLabel={fairInfoLabel}
         />
       ) : (
         <BudgetTodayHeadline
@@ -543,6 +609,8 @@ function BudgetToday({
           fairActive={todayMode === "fair"}
           loading={todayLoading}
           onClick={onToggleTodayMode}
+          fairBreakdown={fairBreakdown}
+          fairInfoLabel={fairInfoLabel}
         />
       )}
       <div

@@ -378,14 +378,14 @@ function AppBody({ logout }: { logout: () => void }) {
    /** D-only peek: fetch the expanded fair range even in raw mode so the toggle
     * can appear instantly on first switch and tail-overlap (fair !== raw) is
     * detectable. W/M uses fair-only (saves a request). */
-   const { fairTotal, fairLoading, hasAllocated: fairHasAllocated } = useFairTotal(
-     period,
-     totalMode,
-     optimisticExpenses,
-     fairRefreshKey,
-     new Date(),
-     { peek: period === "day" },
-    );
+    const { fairTotal, fairLoading, hasAllocated: fairHasAllocated, fairBreakdown } = useFairTotal(
+      period,
+      totalMode,
+      optimisticExpenses,
+      fairRefreshKey,
+      new Date(),
+      { peek: period === "day" },
+     );
 
     // --- Focused-day (W/M browse selection) totals + clickability ----------------
     // (declared here for ordering; actual computation depends on focusedDayKey
@@ -448,14 +448,18 @@ function AppBody({ logout }: { logout: () => void }) {
     () => `budget-day:${budgetTodayMode}:${fairExpensesSignature}`,
     [budgetTodayMode, fairExpensesSignature],
   );
-  const { fairTotal: budgetFairTotal, fairLoading: budgetFairLoading } = useFairTotal(
-    "day",
-    isBudget ? budgetTodayMode : "raw",
-    optimisticExpenses,
-    budgetFairRefreshKey,
-    new Date(),
-    { peek: isBudget },
-  );
+   const {
+     fairTotal: budgetFairTotal,
+     fairLoading: budgetFairLoading,
+     fairBreakdown: budgetFairBreakdown,
+   } = useFairTotal(
+     "day",
+     isBudget ? budgetTodayMode : "raw",
+     optimisticExpenses,
+     budgetFairRefreshKey,
+     new Date(),
+     { peek: isBudget },
+   );
   const budgetTodayFairFallback = budgetTodayMode === "fair" && budgetFairTotal === null;
   // Plain calculator screen: budget/insight/special history own the full body
   // and must not share the row with the period strip or amount input.
@@ -531,11 +535,12 @@ function AppBody({ logout }: { logout: () => void }) {
     [totalMode, focusedDayKey, fairExpensesSignature],
   );
 
-  const {
-    fairTotal: focusedFairTotal,
-    fairLoading: focusedFairLoading,
-    hasAllocated: focusedHasAllocated,
-  } = useFairDayTotal(focusedDayKey, totalMode, optimisticExpenses, focusedFairRefreshKey, now);
+   const {
+     fairTotal: focusedFairTotal,
+     fairLoading: focusedFairLoading,
+     hasAllocated: focusedHasAllocated,
+     fairBreakdown: focusedFairBreakdown,
+   } = useFairDayTotal(focusedDayKey, totalMode, optimisticExpenses, focusedFairRefreshKey, now);
 
   // --- Focused-day (W/M browse selection) totals -------------------------------
   /** Raw total for the selected civil day (Jakarta), from the live expenses list. */
@@ -605,6 +610,36 @@ function AppBody({ logout }: { logout: () => void }) {
   }, [totalMode, focusedFairTotal, selectedDayRawTotal, focusedDayKey, fairTotal, total]);
   const displayLabel = formatIDRAbbreviated(displayTotal);
   const isFairFallback = totalMode === "fair" && (focusedDayKey !== null ? focusedFairTotal === null : fairTotal === null);
+
+  // --- Fair breakdown + dialog label (D + focused-day only; W/M overview excluded) --
+  const headerFairBreakdown = useMemo(() => {
+    if (isBudget || isInsight) return null;
+    if (focusedDayKey !== null) return focusedFairBreakdown;
+    if (period === "day") return fairBreakdown;
+    // W/M overview: no breakdown exposed.
+    return null;
+  }, [isBudget, isInsight, focusedDayKey, focusedFairBreakdown, period, fairBreakdown]);
+
+  const headerFairInfoLabel = useMemo(
+    () =>
+      focusedDayKey !== null
+        ? `Rincian fair — ${(() => {
+            const parts = focusedDayKey.split("-").map(Number);
+            if (parts.length !== 3 || parts.some(Number.isNaN)) return focusedDayKey;
+            const [year, month, day] = parts as [number, number, number];
+            return formatDateShort(
+              new Date(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T12:00:00+07:00`),
+              APP_TIMEZONE,
+            );
+          })()}`
+        : "Rincian fair — Hari ini",
+    [focusedDayKey],
+  );
+
+  // aria-pressed/label follow the mode (fair value shown or not); the dotted
+  // underline and [?] button follow breakdown presence (D + focused-day only —
+  // W/M overview keeps its dotted toggle with no [?]).
+  const headerFairPressed = totalMode === "fair";
 
   const doFlash = useCallback(() => {
     setFlash(true);
@@ -1666,16 +1701,18 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
        <Header
-         periodLabel={effectivePeriodLabel}
-         totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
-         status={
-           <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
-         }
-         totalClickable={totalClickableExtended}
-         totalFairActive={totalMode === "fair"}
-          totalLoading={focusedDayKey !== null ? focusedFairLoading : fairLoading}
-         onTotalClick={toggleTotalMode}
-         trailing={
+          periodLabel={effectivePeriodLabel}
+          totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
+          status={
+            <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+          }
+          totalClickable={totalClickableExtended}
+          totalFairActive={headerFairPressed}
+           totalLoading={focusedDayKey !== null ? focusedFairLoading : fairLoading}
+          onTotalClick={toggleTotalMode}
+          fairBreakdown={headerFairBreakdown}
+          fairInfoLabel={headerFairInfoLabel}
+          trailing={
             <UserMenu
               onLogout={logout}
               onAccountDeleted={logout}
@@ -1748,10 +1785,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           seriesLoading={budget.seriesLoading}
           budgetTodayMode={budgetTodayMode}
           onToggleBudgetTodayMode={toggleBudgetTodayMode}
-          budgetTodaySpentFair={budgetFairTotal}
-          budgetTodayLoading={budgetFairLoading}
-          budgetTodayFairFallback={budgetTodayFairFallback}
-        />
+           budgetTodaySpentFair={budgetFairTotal}
+           budgetTodayLoading={budgetFairLoading}
+           budgetTodayFairFallback={budgetTodayFairFallback}
+           budgetTodayFairBreakdown={budgetFairBreakdown}
+           budgetTodayFairInfoLabel="Rincian fair — Hari ini"
+         />
       ) : isInsight ? (
         <InsightScreen
           insights={insights}

@@ -149,6 +149,69 @@ describe("App — Fair Total Toggle (spec §Adv-5)", () => {
     expect(screen.queryByTestId("total-toggle-button")).not.toBeInTheDocument();
   });
 
+  it("fair mode: dotted underline removed and [?] info button appears on the header total", async () => {
+    const fairExpenses = [
+      { id: "e1", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+      { id: "e2", amount: 300_000, occurredAt: new Date().toISOString(), allocationType: "MONTHLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses: fairExpenses, total: 1_000_000 });
+
+    const user = await renderUnlocked();
+    const total = await screen.findByTestId("header-total");
+    expect(total.tagName).toBe("BUTTON");
+    expect(total.className).toMatch(/fair-dotted/);
+    expect(screen.queryByTestId("fair-info")).not.toBeInTheDocument();
+
+    // Switch to fair
+    await user.click(total);
+    await waitFor(() => {
+      expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "true");
+    });
+
+    // Fair active: dotted removed + [?] info button present
+    expect(screen.getByTestId("header-total").className).not.toMatch(/fair-dotted/);
+    expect(screen.getByTestId("fair-info")).toBeInTheDocument();
+  });
+
+  it("fair mode: clicking the header total returns to raw (toggle preserved)", async () => {
+    const fairExpenses = [
+      { id: "e1", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses: fairExpenses, total: 700_000 });
+
+    const user = await renderUnlocked();
+    const total = await screen.findByTestId("header-total");
+
+    await user.click(total);
+    await waitFor(() => {
+      expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(screen.getByTestId("fair-info")).toBeInTheDocument();
+
+    // Click the (plain) value → back to raw
+    await user.click(screen.getByTestId("header-total"));
+    await waitFor(() => {
+      expect(screen.getByTestId("header-total")).toHaveAttribute("aria-pressed", "false");
+    });
+    expect(screen.getByTestId("header-total").className).toMatch(/fair-dotted/);
+    expect(screen.queryByTestId("fair-info")).not.toBeInTheDocument();
+  });
+
+  it("W/M overview: [?] info button does NOT appear in fair mode (no breakdown passed)", async () => {
+    const expenses = [
+      { id: "e1", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+    ];
+    listMock.mockResolvedValue({ expenses, total: 700_000 });
+
+    const user = await renderUnlocked();
+    await user.click(screen.getByTestId("period-week"));
+    await screen.findByTestId("summary-list");
+
+    // Overview total is a SPAN (raw, no peek for W) → no [?]
+    expect(screen.getByTestId("header-total").tagName).toBe("SPAN");
+    expect(screen.queryByTestId("fair-info")).not.toBeInTheDocument();
+  });
+
   it("falls back to raw when Fair fetch fails (offline/error)", async () => {
     const mainExpenses = [
       { id: "e1", amount: 50_000, occurredAt: new Date().toISOString(), allocationType: "NONE" as const },

@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import type { FairBreakdown } from "@expense-app/shared";
+import { FairInfoButton } from "./FairBreakdown";
 
 export interface HeaderProps {
   periodLabel: string;
@@ -12,6 +14,14 @@ export interface HeaderProps {
   totalFairActive?: boolean;
   totalLoading?: boolean;
   onTotalClick?: () => void;
+  /** Breakdown for the fair total (day scope only). When present and
+   * totalFairActive, the value is rendered as a plain button (no dotted
+   * underline) with a [?] info button beside it. Clicking the value still
+   * toggles back to raw (toggle preserved). W/M overview never passes a
+   * breakdown, so no [?] appears there. */
+  fairBreakdown?: FairBreakdown | null;
+  /** Title label for the [?] dialog (e.g. "Rincian fair — 24 Sep"). */
+  fairInfoLabel?: string;
 }
 
 /** Slim top bar: period label (+ optional status) left, total + trailing cluster right. */
@@ -24,8 +34,15 @@ export function Header({
   totalFairActive = false,
   totalLoading = false,
   onTotalClick,
+  fairBreakdown,
+  fairInfoLabel,
 }: HeaderProps) {
   const totalAriaLabel = totalFairActive ? "Kembali ke total normal" : "Tampilkan total fair";
+  const hasBreakdown = Boolean(fairBreakdown);
+  // Fair mode active with a breakdown: the value stays a toggle button but
+  // loses the dotted underline and gains a [?] info button.
+  const totalIsFairPlain = totalFairActive && hasBreakdown;
+  const valueIsButton = totalIsFairPlain || totalClickable;
   return (
     <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
       <div className="flex min-w-0 items-center gap-2">
@@ -33,7 +50,7 @@ export function Header({
         {status}
       </div>
       <div className="flex items-center gap-2">
-        {totalClickable ? (
+        {valueIsButton ? (
           <button
             type="button"
             data-testid="header-total"
@@ -41,9 +58,9 @@ export function Header({
             aria-label={totalAriaLabel}
             title={totalAriaLabel}
             onClick={onTotalClick}
-            className={`fair-dotted cursor-pointer text-sm font-semibold tabular-nums text-neutral-100 ${
-              totalLoading ? "animate-pulse" : ""
-            }`}
+            className={`cursor-pointer text-sm font-semibold tabular-nums text-neutral-100 ${
+              totalIsFairPlain ? "" : "fair-dotted"
+            } ${totalLoading ? "animate-pulse" : ""}`}
           >
             {totalLabel}
           </button>
@@ -51,6 +68,13 @@ export function Header({
           <span className="text-sm font-semibold tabular-nums text-neutral-100" data-testid="header-total">
             {totalLabel}
           </span>
+        )}
+        {totalIsFairPlain && (
+          <FairInfoButton
+            label={fairInfoLabel ?? "Rincian fair — Hari ini"}
+            breakdown={fairBreakdown!}
+            show={true}
+          />
         )}
         {trailing}
       </div>

@@ -164,9 +164,14 @@ describe("App — budget entry + calculator hygiene", () => {
       expenses: [{ id: "e1", amount: 35_000, occurredAt: new Date().toISOString() }],
       total: 35_000,
     });
-    // Dates must include today (2026-09-19) — otherwise the ticker says "upcoming".
+    // Dates must include today — otherwise the ticker says "upcoming"
+    // (and past Oct 2026 a hardcoded Sep-2026 endDate reads as finished).
+    const today = new Date();
+    const isoDay = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const end = new Date(today.getTime() + 30 * 86_400_000);
     getActiveMock.mockResolvedValue(
-      activeBudget({ startDate: "2026-09-01", endDate: "2026-09-30" }),
+      activeBudget({ startDate: isoDay(today), endDate: isoDay(end) }),
     );
     await renderUnlocked();
 

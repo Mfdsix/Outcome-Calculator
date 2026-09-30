@@ -6,6 +6,7 @@ import {
   allocationWindow,
   distributeAllocation,
   expenseEffectiveAmount,
+  fairBreakdownForDay,
   fairPeriodRange,
   fairTotalForPeriod,
   type AllocationType,
@@ -315,5 +316,90 @@ describe("allocationAwareTotal with expanded range", () => {
     // MONTHLY 300k at Sep 7 → window Sep7-Oct7. Overlap with [Sep7, Sep18): days 7-17 = 11 days → 11 * 10k = 110k
     const result = allocationAwareTotal(expenses, period, TZ);
     expect(result).toBe(50_000 + 100_000 + 110_000);
+  });
+});
+
+describe("fairBreakdownForDay", () => {
+  const day17 = {
+    from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 17 }),
+    to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 18 }),
+  };
+
+  it("WEEKLY 700k → 100k/day, MONTHLY 300k → 10k/day, NONE excluded from rows but in total", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const expenses = [
+      { id: "e1", amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00", allocationType: "NONE" as AllocationType },
+      { id: "e2", amount: 700_000, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+      { id: "e3", amount: 300_000, occurredAt: "2026-09-17T08:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day17, TZ, now);
+    expect(result.fairTotal).toBe(160_000);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.some((r) => r.id === "e2" && r.allocationType === "WEEKLY" && r.perDayAmount === 100_000)).toBe(true);
+    expect(result.rows.some((r) => r.id === "e3" && r.allocationType === "MONTHLY" && r.perDayAmount === 10_000)).toBe(true);
+  });
+
+  it("MONTHLY expense from 20 days ago contributes 10k/day to today", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const expenses = [
+      { id: "m1", amount: 300_000, occurredAt: "2026-08-28T10:00:00+07:00", allocationType: "MONTHLY" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day17, TZ, now);
+    expect(result.fairTotal).toBe(10_000);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({ id: "m1", allocationType: "MONTHLY", perDayAmount: 10_000 });
+  });
+
+  it("expense outside the allocation window does not appear in rows", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    // WEEKLY 700k started Sep 17, so Sep 25 (day 9) is outside its 7-day window.
+    const day25 = {
+      from: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 25 }),
+      to: zonedWallTimeToUtc(TZ, { year: 2026, month: 9, day: 26 }),
+    };
+    const expenses = [
+      { id: "w1", amount: 700_000, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day25, TZ, now);
+    expect(result.fairTotal).toBe(0);
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("NONE expense in-period included in total but not in rows", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const expenses = [
+      { id: "n1", amount: 50_000, occurredAt: "2026-09-17T10:00:00+07:00", allocationType: "NONE" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day17, TZ, now);
+    expect(result.fairTotal).toBe(50_000);
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("no contributors → empty rows, fairTotal 0 (raw == fair)", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const result = fairBreakdownForDay([], day17, TZ, now);
+    expect(result.fairTotal).toBe(0);
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it("remainder spreads to earliest days — day 1 gets base+1", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    // 1_000_001 / 7 = 142857 base, remainder 2 → days 1 and 2 get +1
+    const expenses = [
+      { id: "r1", amount: 1_000_001, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day17, TZ, now);
+    expect(result.fairTotal).toBe(142_858);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.perDayAmount).toBe(142_858);
+  });
+
+  it("expense id falls back to index when missing", () => {
+    const now = new Date("2026-09-17T14:00:00+07:00");
+    const expenses = [
+      { amount: 700_000, occurredAt: "2026-09-17T09:00:00+07:00", allocationType: "WEEKLY" as AllocationType },
+    ];
+    const result = fairBreakdownForDay(expenses, day17, TZ, now);
+    expect(result.rows[0]!.id).toBe("fair-row-0");
   });
 });

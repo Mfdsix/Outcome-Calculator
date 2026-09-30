@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { fairTotalForPeriod } from "@expense-app/shared";
+import { fairBreakdownForDay, fairTotalForPeriod } from "@expense-app/shared";
 
 import { expensesRepository } from "../lib/repository";
 import { APP_TIMEZONE, currentPeriodRange, expandedFairQuery } from "../lib/periods";
 import { type ApiError, OfflineError } from "../lib/api";
 import type { ExpenseDto } from "@expense-app/shared";
+import type { FairBreakdown } from "@expense-app/shared";
 import type { Period } from "../types/ui";
 import type { TotalMode } from "./useTotalMode";
 
@@ -16,6 +17,9 @@ export interface UseFairTotalResult {
    * allocationType !== "NONE" — used to decide toggle visibility when fair
    * has not yet differed from raw (e.g. tail-only allocation overlap). */
   hasAllocated: boolean;
+  /** Fair breakdown for the single-day (D) scope. Null for W/M periods
+   * (W/M overview exposes no breakdown) and when not fetched / on error. */
+  fairBreakdown: FairBreakdown | null;
 }
 
 export interface UseFairTotalOpts {
@@ -57,6 +61,7 @@ export function useFairTotal(
   const [fairTotal, setFairTotal] = useState<number | null>(null);
   const [fairLoading, setFairLoading] = useState(false);
   const [hasAllocated, setHasAllocated] = useState(false);
+  const [fairBreakdown, setFairBreakdown] = useState<FairBreakdown | null>(null);
 
   const inflightRef = useRef<AbortController | null>(null);
 
@@ -78,6 +83,7 @@ export function useFairTotal(
       setFairLoading(true);
       setFairTotal(null);
       setHasAllocated(false);
+      setFairBreakdown(null);
 
       const frozenNow = new Date(nowTimestampRef.current);
       const { from, to } = expandedFairQuery(period, frozenNow);
@@ -98,6 +104,20 @@ export function useFairTotal(
           const total = fairTotalForPeriod(merged, range, APP_TIMEZONE, frozenNow);
           if (!Number.isFinite(total)) return;
           setFairTotal(total);
+
+          // Breakdown is only meaningful for the single-day (D) scope, where
+          // `range` is exactly one civil day. For W/M ranges the day-slice
+          // helper would return a misleading first-day slice, so callers must
+          // never receive one (W/M overview exposes no breakdown).
+          if (period === "day") {
+            const breakdown = fairBreakdownForDay(
+              merged,
+              range,
+              APP_TIMEZONE,
+              frozenNow,
+            );
+            setFairBreakdown(breakdown);
+          }
         })
         .catch((cause: unknown) => {
           if (signal.aborted) return;
@@ -128,6 +148,7 @@ export function useFairTotal(
       setFairTotal(null);
       setFairLoading(false);
       setHasAllocated(false);
+      setFairBreakdown(null);
       return;
     }
     const controller = new AbortController();
@@ -136,5 +157,5 @@ export function useFairTotal(
     return () => controller.abort();
   }, [shouldFetch, fetchFair, refreshKey]);
 
-  return { fairTotal, fairLoading, hasAllocated };
+  return { fairTotal, fairLoading, hasAllocated, fairBreakdown };
 }
