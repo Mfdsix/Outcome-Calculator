@@ -20,8 +20,11 @@ export interface HeaderProps {
    * toggles back to raw (toggle preserved). W/M overview never passes a
    * breakdown, so no [?] appears there. */
   fairBreakdown?: FairBreakdown | null;
-  /** Title label for the [?] dialog (e.g. "Rincian fair — 24 Sep"). */
+  /** Title label for the [?] dialog title (e.g. "Rincian fair — 24 Sep"). */
   fairInfoLabel?: string;
+  /** Civil day key (YYYY-MM-DD) the user is viewing, passed to the [?]
+   * dialog so each row can show its allocation window end + remaining days. */
+  fairInfoDayKey?: string | null;
 }
 
 /** Slim top bar: period label (+ optional status) left, total + trailing cluster right. */
@@ -36,6 +39,7 @@ export function Header({
   onTotalClick,
   fairBreakdown,
   fairInfoLabel,
+  fairInfoDayKey,
 }: HeaderProps) {
   const totalAriaLabel = totalFairActive ? "Kembali ke total normal" : "Tampilkan total fair";
   const hasBreakdown = Boolean(fairBreakdown);
@@ -74,6 +78,7 @@ export function Header({
             label={fairInfoLabel ?? "Rincian fair — Hari ini"}
             breakdown={fairBreakdown!}
             show={true}
+            dayKey={fairInfoDayKey ?? null}
           />
         )}
         {trailing}

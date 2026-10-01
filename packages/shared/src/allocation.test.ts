@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   allocateAmount,
   allocationAwareTotal,
+  allocationEndCaption,
   allocationWindow,
   distributeAllocation,
   expenseEffectiveAmount,
@@ -401,5 +402,84 @@ describe("fairBreakdownForDay", () => {
     ];
     const result = fairBreakdownForDay(expenses, day17, TZ, now);
     expect(result.rows[0]!.id).toBe("fair-row-0");
+  });
+});
+
+describe("allocationEndCaption", () => {
+  it("WEEKLY 7-day window: end label + remaining", () => {
+    // Expense started 24 Sep 2026 → window 24..30 Sep
+    const result = allocationEndCaption(
+      "2026-09-24T10:00:00+07:00",
+      "WEEKLY",
+      TZ,
+      "2026-09-24",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("30 Sep");
+    expect(result!.remainingText).toBe("sisa 6 hari");
+  });
+
+  it("last day of window → 'hari terakhir' (not 'sisa 0 hari')", () => {
+    // Window ends 30 Sep; viewed on 30 Sep itself
+    const result = allocationEndCaption(
+      "2026-09-24T10:00:00+07:00",
+      "WEEKLY",
+      TZ,
+      "2026-09-30",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("30 Sep");
+    expect(result!.remainingText).toBe("hari terakhir");
+  });
+
+  it("crosses month boundary: 28 Sep → s.d. 4 Okt, viewed 1 Oct → sisa 3 hari", () => {
+    // WEEKLY started 28 Sep → window 28 Sep..4 Oct
+    const result = allocationEndCaption(
+      "2026-09-28T10:00:00+07:00",
+      "WEEKLY",
+      TZ,
+      "2026-10-01",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("04 Okt");
+    expect(result!.remainingText).toBe("sisa 3 hari");
+  });
+
+  it("viewed past the window end → clamped to 'hari terakhir'", () => {
+    // Window ends 30 Sep; viewed 5 Oct
+    const result = allocationEndCaption(
+      "2026-09-24T10:00:00+07:00",
+      "WEEKLY",
+      TZ,
+      "2026-10-05",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("30 Sep");
+    expect(result!.remainingText).toBe("hari terakhir");
+  });
+
+  it("invalid dayKey → remainingText is null (only end label)", () => {
+    const result = allocationEndCaption(
+      "2026-09-24T10:00:00+07:00",
+      "WEEKLY",
+      TZ,
+      "not-a-date",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("30 Sep");
+    expect(result!.remainingText).toBeNull();
+  });
+
+  it("MONTHLY 30-day window: end label without year", () => {
+    // Expense started 1 Sep 2026 → window 1 Sep..30 Sep (30 days)
+    const result = allocationEndCaption(
+      "2026-09-01T10:00:00+07:00",
+      "MONTHLY",
+      TZ,
+      "2026-09-15",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.endLabel).toBe("30 Sep");
+    expect(result!.remainingText).toBe("sisa 15 hari");
   });
 });

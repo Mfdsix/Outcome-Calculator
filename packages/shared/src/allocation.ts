@@ -1,4 +1,4 @@
-import { addCivilDays, getZonedParts, zonedWallTimeToUtc } from "./periods";
+import { addCivilDays, formatDateShort, getZonedParts, zonedWallTimeToUtc } from "./periods";
 import type { PeriodRange } from "./periods";
 
 export type AllocationType = "NONE" | "WEEKLY" | "MONTHLY";
@@ -227,6 +227,65 @@ export function allocationAwareTotal(
   return expenses.reduce((sum, expense) => {
     return sum + expenseEffectiveAmount(expense, period, timeZone);
   }, 0);
+}
+
+/**
+ * Compute the civil day span of an allocation window and format the
+ * end-caption + remaining-days text for a row.
+ *
+ * `viewedDayKey` is the civil day key (YYYY-MM-DD) the user is looking at,
+ * in `timeZone`. The "last day" of a window is its civil `from` day + (days − 1).
+ * Remaining is the civil-day difference between the window's last day and the
+ * viewed day — never negative, so an already-expired window yields "hari terakhir"
+ * rather than "sisa 0 hari".
+ *
+ * Returns null when there is no allocation window (NONE) so callers can skip
+ * the sub-caption. For an invalid `viewedDayKey` the remaining text is omitted
+ * (only "s.d. <end>" is returned) so the UI degrades gracefully.
+ */
+export function allocationEndCaption(
+  occurredAt: string,
+  allocationType: "WEEKLY" | "MONTHLY",
+  timeZone: string,
+  viewedDayKey: string,
+): { endLabel: string; remainingText: string | null } | null {
+  const expense = new Date(occurredAt);
+  const win = allocationWindow(expense, allocationType, timeZone);
+  if (!win) return null;
+
+  const fromParts = getZonedParts(win.from, timeZone);
+  const lastCivil = addCivilDays(
+    { year: fromParts.year, month: fromParts.month, day: fromParts.day },
+    win.days - 1,
+  );
+  const endLabel = formatDateShort(
+    zonedWallTimeToUtc(timeZone, {
+      year: lastCivil.year,
+      month: lastCivil.month,
+      day: lastCivil.day,
+    }),
+    timeZone,
+  ).replace(/\s*\d{4}$/, "");
+
+  const viewed = parseDayKey(viewedDayKey);
+  if (viewed === null) return { endLabel, remainingText: null };
+
+  const viewedMs = Date.UTC(viewed.year, viewed.month - 1, viewed.day);
+  const lastMs = Date.UTC(lastCivil.year, lastCivil.month - 1, lastCivil.day);
+  const diffDays = Math.round((lastMs - viewedMs) / 86_400_000);
+  const clamped = Math.max(0, diffDays);
+
+  const remainingText =
+    clamped === 0 ? "hari terakhir" : `sisa ${clamped} hari`;
+  return { endLabel, remainingText };
+}
+
+function parseDayKey(dayKey: string): { year: number; month: number; day: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null;
+  const parts = dayKey.split("-").map(Number);
+  const [year, month, day] = parts as [number, number, number];
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+  return { year, month, day };
 }
 
 /**

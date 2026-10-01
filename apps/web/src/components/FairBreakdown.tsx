@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { formatIDR } from "@expense-app/shared";
+import { APP_TIMEZONE } from "../lib/periods";
+import { allocationEndCaption, formatIDR } from "@expense-app/shared";
 import type { FairBreakdown } from "@expense-app/shared";
 
 export interface FairInfoButtonProps {
@@ -10,13 +11,17 @@ export interface FairInfoButtonProps {
   breakdown: FairBreakdown;
   /** When true, the [?] button is rendered (i.e. fair mode + clickable scope). */
   show?: boolean;
+  /** Civil day key (YYYY-MM-DD) the user is viewing, in APP_TIMEZONE. Used to
+   * compute remaining-days for each allocation row. When null/invalid the
+   * sub-caption shows only "s.d. <end>" without a remaining text. */
+  dayKey?: string | null;
 }
 
 /**
  * Small `[?]` info button placed inline next to a fair total value.
  * Opens the FairBreakdownDialog on click.
  */
-export function FairInfoButton({ label, breakdown, show }: FairInfoButtonProps) {
+export function FairInfoButton({ label, breakdown, show, dayKey }: FairInfoButtonProps) {
   if (!show) return null;
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -48,7 +53,7 @@ export function FairInfoButton({ label, breakdown, show }: FairInfoButtonProps) 
         ?
       </button>
       {open && createPortal(
-        <FairBreakdownDialog label={label} breakdown={breakdown} onClose={() => setOpen(false)} />,
+        <FairBreakdownDialog label={label} breakdown={breakdown} dayKey={dayKey} onClose={() => setOpen(false)} />,
         document.body,
       )}
     </>
@@ -59,10 +64,12 @@ export interface FairBreakdownDialogProps {
   label: string;
   breakdown: FairBreakdown;
   onClose: () => void;
+  /** Civil day key (YYYY-MM-DD) the user is viewing; drives remaining-days text. */
+  dayKey?: string | null;
 }
 
 /** Reused modal pattern (Backdrop/Click-stop/Escape/close button). */
-export function FairBreakdownDialog({ label, breakdown, onClose }: FairBreakdownDialogProps) {
+export function FairBreakdownDialog({ label, breakdown, dayKey, onClose }: FairBreakdownDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
@@ -91,35 +98,49 @@ export function FairBreakdownDialog({ label, breakdown, onClose }: FairBreakdown
           Total fair: <span className="font-semibold">{formatIDR(breakdown.fairTotal)}</span>
         </p>
 
-        {hasRows ? (
+         {hasRows ? (
           <ul className="divide-y divide-neutral-800/80 border border-neutral-800 rounded-lg overflow-hidden">
-            {rows.map((row) => (
-              <li
-                key={row.id}
-                data-testid={`fair-breakdown-row-${row.id}`}
-                className="flex items-center justify-between gap-2 px-3 py-2"
-              >
-                <span className="text-xs text-neutral-300 truncate">
-                  {new Date(row.occurredAt).toLocaleDateString("id-ID", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                  })}{" "}
-                  <span
-                    className={
-                      row.allocationType === "WEEKLY"
-                        ? "rounded border border-emerald-800 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300"
-                        : "rounded border border-amber-800 bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300"
-                    }
-                  >
-                    {row.allocationType === "WEEKLY" ? "Weekly" : "Monthly"}
+            {rows.map((row) => {
+              const caption = dayKey
+                ? allocationEndCaption(row.occurredAt, row.allocationType, APP_TIMEZONE, dayKey)
+                : null;
+              return (
+                <li
+                  key={row.id}
+                  data-testid={`fair-breakdown-row-${row.id}`}
+                  className="grid grid-cols-[1fr_auto] items-start gap-2 px-3 py-2"
+                >
+                  <span className="text-xs text-neutral-300 truncate">
+                    {new Date(row.occurredAt).toLocaleDateString("id-ID", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}{" "}
+                    <span
+                      className={
+                        row.allocationType === "WEEKLY"
+                          ? "rounded border border-emerald-800 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300"
+                          : "rounded border border-amber-800 bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300"
+                      }
+                    >
+                      {row.allocationType === "WEEKLY" ? "Weekly" : "Monthly"}
+                    </span>
                   </span>
-                </span>
-                <span className="text-sm font-semibold tabular-nums text-neutral-100">
-                  {formatIDR(row.perDayAmount)}
-                </span>
-              </li>
-            ))}
+                  <span className="text-sm font-semibold tabular-nums text-neutral-100">
+                    {formatIDR(row.perDayAmount)}
+                  </span>
+                  {caption && (
+                    <p
+                      data-testid={`fair-breakdown-until-${row.id}`}
+                      className="col-span-2 mt-1 text-[11px] text-neutral-500"
+                    >
+                      s.d. {caption.endLabel}
+                      {caption.remainingText ? ` · ${caption.remainingText}` : ""}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="py-4 text-center text-sm text-neutral-500">

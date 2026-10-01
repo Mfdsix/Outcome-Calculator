@@ -120,4 +120,47 @@ describe("FairInfoButton + FairBreakdownDialog", () => {
     expect(screen.queryByTestId(/fair-breakdown-row-/)).not.toBeInTheDocument();
     expect(screen.getByText("Tidak ada alokasi yang kena hari ini.")).toBeInTheDocument();
   });
+
+  it("renders sub-caption per row with dayKey", async () => {
+    const user = userEvent.setup();
+    render(
+      <FairInfoButton
+        label="Rincian fair — 24 Sep"
+        breakdown={SAMPLE_BREAKDOWN}
+        show={true}
+        dayKey="2026-09-24"
+      />,
+    );
+
+    await user.click(screen.getByTestId("fair-info"));
+    await screen.findByTestId("fair-breakdown");
+
+    // Row e2: WEEKLY started 17 Sep → window ends 23 Sep, viewed on 24 Sep (past end) → hari terakhir
+    const e2Caption = screen.getByTestId("fair-breakdown-until-e2");
+    expect(e2Caption).toBeInTheDocument();
+    expect(e2Caption).toHaveTextContent("s.d. 23 Sep · hari terakhir");
+
+    // Row e3: MONTHLY started 17 Sep → window ends 16 Oct, viewed 24 Sep → sisa 22 hari
+    const e3Caption = screen.getByTestId("fair-breakdown-until-e3");
+    expect(e3Caption).toBeInTheDocument();
+    expect(e3Caption).toHaveTextContent("s.d. 16 Okt · sisa 22 hari");
+  });
+
+  it("omits remaining text when dayKey is not provided", async () => {
+    const user = userEvent.setup();
+    render(
+      <FairInfoButton
+        label="Rincian fair — 24 Sep"
+        breakdown={SAMPLE_BREAKDOWN}
+        show={true}
+      />
+    );
+
+    await user.click(screen.getByTestId("fair-info"));
+    await screen.findByTestId("fair-breakdown");
+
+    // Without dayKey, no until-caption elements should be rendered at all.
+    expect(screen.queryByTestId("fair-breakdown-until-e2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fair-breakdown-until-e3")).not.toBeInTheDocument();
+  });
 });

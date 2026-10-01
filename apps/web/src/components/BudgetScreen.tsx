@@ -55,6 +55,9 @@ export interface BudgetScreenProps {
   budgetTodayFairBreakdown?: FairBreakdown | null;
   /** Label for the [?] dialog title (e.g. "Rincian fair — 24 Sep"). */
   budgetTodayFairInfoLabel?: string;
+  /** Civil day key (YYYY-MM-DD) the user is viewing, forwarded to the [?] dialog
+   * so allocation rows can show their window end + remaining days. */
+  budgetTodayFairInfoDayKey?: string | null;
 }
 
 interface PrefillState {
@@ -83,7 +86,7 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel, budgetTodayFairInfoDayKey }: BudgetScreenProps) {
   /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
   const nowISO = useMemo(() => new Date().toISOString(), []);
@@ -235,6 +238,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                    fairFallback={budgetTodayFairFallback}
                    fairBreakdown={budgetTodayFairBreakdown}
                    fairInfoLabel={budgetTodayFairInfoLabel}
+                   fairInfoDayKey={budgetTodayFairInfoDayKey ?? todayISO}
                  />
 
                 {/* Layer 2: Period card */}
@@ -445,6 +449,7 @@ function BudgetTodayHeadline({
   onClick,
   fairBreakdown,
   fairInfoLabel,
+  fairInfoDayKey,
 }: {
   testid: string;
   text: string;
@@ -456,6 +461,8 @@ function BudgetTodayHeadline({
   /** Fair breakdown — when present and fairActive, render plain + info button. */
   fairBreakdown?: FairBreakdown | null;
   fairInfoLabel?: string;
+  /** Civil day key forwarded to the FairInfoButton for remaining-days text. */
+  fairInfoDayKey?: string | null;
 }) {
   const showInfo = fairActive && Boolean(fairBreakdown);
   if (showInfo && clickable) {
@@ -479,6 +486,7 @@ function BudgetTodayHeadline({
           label={fairInfoLabel ?? "Rincian fair — Hari ini"}
           breakdown={fairBreakdown!}
           show={true}
+          dayKey={fairInfoDayKey}
         />
       </div>
     );
@@ -497,6 +505,7 @@ function BudgetTodayHeadline({
           label={fairInfoLabel ?? "Rincian fair — Hari ini"}
           breakdown={fairBreakdown!}
           show={true}
+          dayKey={fairInfoDayKey}
         />
       </div>
     );
@@ -542,6 +551,7 @@ function BudgetToday({
   fairFallback,
   fairBreakdown,
   fairInfoLabel,
+  fairInfoDayKey,
 }: {
   type: BudgetType;
   amount: number;
@@ -555,6 +565,8 @@ function BudgetToday({
   fairFallback: boolean;
   fairBreakdown?: FairBreakdown | null;
   fairInfoLabel?: string;
+  /** Civil day key forwarded to the [?] dialog for remaining-days text. */
+  fairInfoDayKey?: string | null;
 }) {
   const isDaily = type === "daily";
   const cap = amount;

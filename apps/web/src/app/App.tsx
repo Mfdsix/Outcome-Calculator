@@ -529,6 +529,14 @@ function AppBody({ logout }: { logout: () => void }) {
 
   /** Current time reference for relative day labels (recomputed each render). */
   const now = useMemo(() => new Date(), []);
+  /** Civil day key for "hari ini" (when not in focused W/M day scope). */
+  const todayKey = useMemo(() => dayKeyOf(getZonedParts(now, APP_TIMEZONE)), [now]);
+
+  /** Civil day key the Header [?] dialog should use for remaining-days text. */
+  const headerFairInfoDayKey = useMemo(
+    () => focusedDayKey ?? todayKey,
+    [focusedDayKey, todayKey],
+  );
 
   const focusedFairRefreshKey = useMemo(
     () => `focused-day:${totalMode}:${focusedDayKey ?? "none"}:${fairExpensesSignature}`,
@@ -1711,8 +1719,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
            totalLoading={focusedDayKey !== null ? focusedFairLoading : fairLoading}
           onTotalClick={toggleTotalMode}
           fairBreakdown={headerFairBreakdown}
-          fairInfoLabel={headerFairInfoLabel}
-          trailing={
+           fairInfoLabel={headerFairInfoLabel}
+           fairInfoDayKey={headerFairInfoDayKey}
+           trailing={
             <UserMenu
               onLogout={logout}
               onAccountDeleted={logout}
