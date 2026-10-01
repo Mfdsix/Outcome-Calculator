@@ -15,6 +15,9 @@ export interface GraphSectionProps {
 
   /** Daily cap for over-day marking (daily budgets only; null = off). */
   dailyCap?: number | null;
+
+  /** When true and buckets are empty, BarChart shows a shimmer. */
+  loading?: boolean;
 }
 
 /**
@@ -30,6 +33,7 @@ export function GraphSection({
   title,
   snapshot,
   dailyCap = null,
+  loading = false,
 }: GraphSectionProps) {
   const budgetDelta =
     snapshot !== null && "remaining" in snapshot
@@ -47,6 +51,7 @@ export function GraphSection({
         title={title}
         budgetDelta={budgetDelta}
         overCap={dailyCap}
+        loading={loading}
       />
     </div>
   );

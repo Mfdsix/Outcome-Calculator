@@ -2,11 +2,14 @@ import { memo } from "react";
 
 import type { BrowseRow } from "./BrowseList";
 import { useScrollSelected } from "./useScrollSelected";
+import { ShimmerRows } from "./Shimmer";
 
 export interface SummaryListProps {
   rows: BrowseRow[];
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** When true and rows are empty, show shimmer rows instead of "No data yet". */
+  loading?: boolean;
 }
 
 /**
@@ -14,8 +17,9 @@ export interface SummaryListProps {
  * Label on the left, amount on the right. Selection highlights the row and
  * auto-scrolls it into view (useScrollSelected).
  */
-export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSelect }: SummaryListProps) {
+export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSelect, loading = false }: SummaryListProps) {
   if (rows.length === 0) {
+    if (loading) return <ShimmerRows n={5} testid="summary-loading" label="Memuat riwayat" className="h-4 w-full" />;
     return (
       <div className="min-h-0 flex-1" data-testid="summary-empty">
         <p className="py-4 text-center text-sm text-neutral-500">No data yet.</p>
@@ -51,7 +55,7 @@ interface SummaryRowProps {
 function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
   const selected = row.key === selectedKey;
   const rowRef = useScrollSelected(selectedKey);
-      return (
+  return (
     <li key={row.key}>
       <button
         ref={selected ? rowRef : undefined}

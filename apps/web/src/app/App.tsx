@@ -460,7 +460,7 @@ function AppBody({ logout }: { logout: () => void }) {
      new Date(),
      { peek: isBudget },
    );
-  const budgetTodayFairFallback = budgetTodayMode === "fair" && budgetFairTotal === null;
+  const budgetTodayFairFallback = budgetTodayMode === "fair" && !budgetFairLoading && budgetFairTotal === null;
   // Plain calculator screen: budget/insight/special history own the full body
   // and must not share the row with the period strip or amount input.
   const isHomeScreen = !isSpecial && !isBudget && !isInsight;
@@ -617,7 +617,15 @@ function AppBody({ logout }: { logout: () => void }) {
     return total;
   }, [totalMode, focusedFairTotal, selectedDayRawTotal, focusedDayKey, fairTotal, total]);
   const displayLabel = formatIDRAbbreviated(displayTotal);
-  const isFairFallback = totalMode === "fair" && (focusedDayKey !== null ? focusedFairTotal === null : fairTotal === null);
+
+  // During fair loading the fallback must NOT fire — the header shows a shimmer,
+  // not a "·raw" badge. isFairLoadingEffective covers both the D-only load path
+  // and the W/M focused-day load path.
+  const isFairLoadingEffective = focusedDayKey !== null ? focusedFairLoading : fairLoading;
+  const isFairFallback =
+    totalMode === "fair" &&
+    !isFairLoadingEffective &&
+    (focusedDayKey !== null ? focusedFairTotal === null : fairTotal === null);
 
   // --- Fair breakdown + dialog label (D + focused-day only; W/M overview excluded) --
   const headerFairBreakdown = useMemo(() => {
@@ -1816,13 +1824,15 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               rows={drillRows}
               selectedKey={transactionKey}
               onSelect={(key) => setSelectedKey(key)}
+              loading={loading && drillRows.length === 0}
             />
           ) : (
-             <SummaryList
-               rows={summaryRows}
-               selectedKey={selectedKey}
-               onSelect={handleSummarySelect}
-             />
+            <SummaryList
+              rows={summaryRows}
+              selectedKey={selectedKey}
+              onSelect={handleSummarySelect}
+              loading={loading && summaryRows.length === 0}
+            />
           )}
 
           <div className="shrink-0">
@@ -1833,6 +1843,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               title={chartTitle}
               snapshot={effectiveBudgetSnapshot}
               dailyCap={budget.active?.type === "daily" ? budget.active.amount : null}
+              loading={loading && chartBuckets.length === 0}
             />
           </div>
 
@@ -1867,7 +1878,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
               }}
             />
           ) : (
-            <BarChart buckets={chartBuckets} />
+            <BarChart buckets={chartBuckets} loading={loading && chartBuckets.length === 0} />
           )}
           <Keypad
             onDigit={calc.pressDigit}

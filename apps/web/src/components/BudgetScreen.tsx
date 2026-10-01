@@ -27,6 +27,7 @@ import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodCha
 import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { FairInfoButton } from "./FairBreakdown";
+import { ShimmerCard, ShimmerRows, ShimmerText } from "./Shimmer";
 import type { TotalMode } from "../hooks/useTotalMode";
 import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
@@ -208,9 +209,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
       <div className="shrink-0 space-y-4">
         {/* Active card / empty state */}
         {loading && active === null ? (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-6 text-center text-sm text-neutral-500">
-            Memuat...
-          </div>
+          <ShimmerCard testid="budget-card-loading" label="Memuat budget" className="h-40 w-full" />
         ) : active === null ? (
           <div
             data-testid="budget-empty"
@@ -287,9 +286,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           <BudgetDayHistory days={dashboard.days} maxInitial={14} />
         )}
         {!finished && dashboard === null && seriesLoading && active !== null && (
-          <p className="text-center text-xs text-neutral-500" data-testid="budget-series-loading">
-            Memuat riwayat harian...
-          </p>
+          <ShimmerRows n={5} testid="budget-series-loading" label="Memuat riwayat harian" />
         )}
 
       </div>
@@ -464,7 +461,14 @@ function BudgetTodayHeadline({
   /** Civil day key forwarded to the FairInfoButton for remaining-days text. */
   fairInfoDayKey?: string | null;
 }) {
-  const showInfo = fairActive && Boolean(fairBreakdown);
+   const showInfo = fairActive && Boolean(fairBreakdown);
+
+  // While the fair total is loading, render a shimmer instead of the numeric
+  // text so we never flash a stale "·raw" or partial value.
+  if (loading) {
+    return <ShimmerText testid={testid} label="Memuat total" className="mt-1 h-9 w-32" />;
+  }
+
   if (showInfo && clickable) {
     // Fair active + breakdown: still a toggle button (click → raw) but without
     // the dotted underline, plus a [?] info button beside it.
@@ -478,7 +482,7 @@ function BudgetTodayHeadline({
           aria-label={label}
           title={label}
           onClick={onClick}
-          className={`cursor-pointer text-left ${className} ${loading ? "animate-pulse" : ""}`}
+          className={`cursor-pointer text-left ${className}`}
         >
           {text}
         </button>
@@ -497,7 +501,7 @@ function BudgetTodayHeadline({
       <div className="mt-1 flex items-center gap-1.5">
         <span
           data-testid={testid}
-          className={`text-left ${className} ${loading ? "animate-pulse" : ""}`}
+          className={`text-left ${className}`}
         >
           {text}
         </span>
@@ -526,9 +530,7 @@ function BudgetTodayHeadline({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className={`fair-dotted mt-1 cursor-pointer text-left ${className} ${
-        loading ? "animate-pulse" : ""
-      }`}
+      className={`fair-dotted mt-1 cursor-pointer text-left ${className}`}
     >
       {text}
     </button>
@@ -930,13 +932,17 @@ function BudgetFormModal({
           Batal
         </button>
         <button
-          type="submit"
-          data-testid="budget-submit"
-          disabled={!canSubmit}
-          className="h-11 flex-1 rounded-lg bg-emerald-600 text-sm font-semibold text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
-        >
-          {busy ? "Menyimpan..." : "Simpan budget"}
-        </button>
+           type="submit"
+           data-testid="budget-submit"
+           disabled={!canSubmit || busy}
+           className="h-11 flex-1 rounded-lg bg-emerald-600 text-sm font-semibold text-white shadow-[0_2px_0_0_#065f46] active:shadow-none disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+         >
+           {busy ? (
+             <span className="shimmer-inline h-4 w-20" aria-label="Menyimpan..." />
+           ) : (
+             "Simpan budget"
+           )}
+         </button>
       </div>
     </form>
   );

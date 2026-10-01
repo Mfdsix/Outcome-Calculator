@@ -2,18 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
 
 import { PIN_LENGTH } from "@expense-app/shared";
+import { Shimmer, ShimmerText } from "./Shimmer";
 
-export interface LockScreenProps {
+type LockScreenProps = {
   onSubmit: (code: string) => Promise<void>;
   error?: string | null;
   busy: boolean;
-}
+};
 
 const SANITIZE = /[^A-Z0-9]/g;
 const SUBMIT_DELAY = 600;
 
 function sanitizeCode(value: string): string {
   return value.toUpperCase().replace(SANITIZE, "").slice(0, PIN_LENGTH);
+}
+
+
+/** Shimmer bar for the busy PIN slots — a tiny sweep track. */
+function BusyPinBar() {
+  return (
+    <Shimmer
+      className="absolute inset-0 h-1 w-6 rounded-t-sm"
+      label="Memeriksa..."
+    />
+  );
 }
 
 export function LockScreen({ onSubmit, error, busy }: LockScreenProps) {
@@ -117,43 +129,43 @@ export function LockScreen({ onSubmit, error, busy }: LockScreenProps) {
         </span>
       </div>
 
-      <div className="flex gap-1">
-        {Array.from({ length: PIN_LENGTH }, (_, index) => {
-          const filled = code[index] !== undefined;
-          return (
-            <div
-              key={index}
-              className={`h-1 w-6 rounded-t-sm transition-colors ${
-                busy
-                  ? "animate-pulse bg-neutral-600"
-                  : error
-                    ? "bg-red-700"
-                    : filled
-                      ? "bg-emerald-400"
-                      : "bg-neutral-800"
-              }`}
-            />
-          );
-        })}
-      </div>
+          <div className="flex gap-1">
+          {Array.from({ length: PIN_LENGTH }, (_, index) => {
+            const filled = code[index] !== undefined;
+            if (busy) {
+              return (
+                <div key={index} className="relative h-1 w-6">
+                  <BusyPinBar />
+                </div>
+              );
+            }
+            return (
+              <div
+                key={index}
+                className={`h-1 w-6 rounded-t-sm transition-colors ${
+                  error ? "bg-red-700" : filled ? "bg-emerald-400" : "bg-neutral-800"
+                }`}
+              />
+            );
+          })}
+        </div>
 
-      {error && (
-        <p
-          role="alert"
-          data-testid="lock-error"
-          className="text-center text-sm text-red-400"
-        >
-          {error}
-        </p>
-      )}
-      {busy && (
-        <p
-          aria-live="polite"
-          className="text-sm text-neutral-400"
-        >
-          Memeriksa...
-        </p>
-      )}
+        {error && (
+          <p
+            role="alert"
+            data-testid="lock-error"
+            className="text-center text-sm text-red-400"
+          >
+            {error}
+          </p>
+        )}
+        {busy && (
+          <ShimmerText
+            testid="lock-busy-label"
+            label="Memeriksa..."
+            className="h-4 w-24"
+          />
+        )}
 
       <p className="text-xs text-neutral-500">
         PIN kamu = identitasmu • {PIN_LENGTH} karakter alfanumerik • otomatis terkirim

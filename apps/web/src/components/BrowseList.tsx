@@ -1,6 +1,7 @@
 import { memo } from "react";
 
 import { useScrollSelected } from "./useScrollSelected";
+import { ShimmerRows } from "./Shimmer";
 
 export interface BrowseRow {
   key: string;
@@ -16,6 +17,8 @@ export interface BrowseListProps {
   rows: BrowseRow[];
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** When true and rows are empty, show shimmer rows while drilling loads. */
+  loading?: boolean;
 }
 
 /**
@@ -23,7 +26,11 @@ export interface BrowseListProps {
  * transaction rows) and drill-down mode (transactions for a selected day).
  * Selection auto-scrolls into view.
  */
-export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect }: BrowseListProps) {
+export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect, loading = false }: BrowseListProps) {
+  if (rows.length === 0) {
+    if (loading) return <ShimmerRows n={5} testid="browse-loading" label="Memuat transaksi" className="h-4 w-full" />;
+    return null;
+  }
   return (
     <ul
       className="min-h-0 flex-1 divide-y-0 overflow-y-auto"

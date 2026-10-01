@@ -448,3 +448,80 @@ body {
   background-position: 0 100%;
   padding-bottom: 5px;
 }
+
+/* ---------------------------------------------------------------------------
+ * Shimmer sweep — replaces animate-pulse for data-loading surfaces.
+ * A white-transparent gradient sweeps left→right on each [data-shimmer-sweep]
+ * track. prefers-reduced-motion disables the animation (static grey surface).
+ * ------------------------------------------------------------------------- */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+[data-shimmer-sweep] {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 120% 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-shimmer-sweep] {
+    animation: shimmer-sweep 1.4s ease-in-out infinite;
+  }
+}
+
+/* Light theme: sweep uses a softer grey instead of white. */
+html.light [data-shimmer-sweep] {
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0.08) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* Inline shimmer for embedded use inside buttons/text. Same sweep mechanics. */
+.shimmer-inline {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  background-color: currentColor;
+  color: transparent;
+}
+.shimmer-inline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 120% 100%;
+  animation: shimmer-sweep 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-inline::after {
+    animation: none;
+  }
+}
+html.light .shimmer-inline::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0.12) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}

@@ -274,6 +274,44 @@ describe("App — Budget Today fair toggle (independent from header)", () => {
     expect(user).toBeDefined();
   });
 
+  it("during budget-today fair loading shows shimmer, not ·raw", async () => {
+    vi.setSystemTime(new Date("2026-09-28T12:00:00+07:00"));
+
+    localStorage.setItem("expense-app.budget-today-mode", "fair");
+
+    // Expanded fetch (fair) hangs so we can inspect loading state.
+    let firstFrom: string | null = null;
+    const hangingPromise = new Promise(() => {});
+    listMock.mockImplementation((from: string) => {
+      if (firstFrom === null) {
+        firstFrom = from;
+        return Promise.resolve({ expenses: [], total: 0 });
+      }
+      if (from < firstFrom) {
+        return hangingPromise as never;
+      }
+      return Promise.resolve({ expenses: [], total: 0 });
+    });
+
+    getActiveMock.mockResolvedValue(activeBudget({ todaySpent: 35_000, spent: 35_000, status: "ok" }));
+    seriesMock.mockResolvedValue({ days: [] });
+
+    const user = await renderUnlocked();
+    await openBudget(user);
+
+    await screen.findByTestId("budget-today");
+
+    // While fair loading: the headline should be a shimmer (role=status aria-busy),
+    // NOT showing ·raw.
+    await waitFor(() => {
+      const delta = screen.getByTestId("budget-today-delta");
+      expect(delta).toHaveAttribute("role", "status");
+      expect(delta).toHaveAttribute("aria-busy", "true");
+      expect(delta).not.toHaveTextContent("·raw");
+    });
+    expect(user).toBeDefined();
+  });
+
   it("offline → fair null → raw displayed in today card", async () => {
     vi.setSystemTime(new Date("2026-09-28T12:00:00+07:00"));
 

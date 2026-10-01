@@ -1,6 +1,8 @@
 import { type ReactNode } from "react";
 import type { FairBreakdown } from "@expense-app/shared";
+
 import { FairInfoButton } from "./FairBreakdown";
+import { ShimmerText } from "./Shimmer";
 
 export interface HeaderProps {
   periodLabel: string;
@@ -47,6 +49,29 @@ export function Header({
   // loses the dotted underline and gains a [?] info button.
   const totalIsFairPlain = totalFairActive && hasBreakdown;
   const valueIsButton = totalIsFairPlain || totalClickable;
+
+  // While the fair value is loading, render a fixed-width shimmer so the
+  // header doesn't flash "·raw" then the fair total. Fixed width avoids CLS.
+  // fairBreakdown is null during loading (the hook resets it), so no [?] renders.
+  if (totalLoading) {
+    return (
+      <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-medium text-neutral-400" data-testid="header-period-label">{periodLabel}</span>
+          {status}
+        </div>
+        <div className="flex items-center gap-2">
+          <ShimmerText
+            testid="header-total"
+            label="Memuat total"
+            className="h-5 w-20"
+          />
+          {trailing}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
       <div className="flex min-w-0 items-center gap-2">
@@ -62,9 +87,7 @@ export function Header({
             aria-label={totalAriaLabel}
             title={totalAriaLabel}
             onClick={onTotalClick}
-            className={`cursor-pointer text-sm font-semibold tabular-nums text-neutral-100 ${
-              totalIsFairPlain ? "" : "fair-dotted"
-            } ${totalLoading ? "animate-pulse" : ""}`}
+            className={`cursor-pointer text-sm font-semibold tabular-nums text-neutral-100 ${totalIsFairPlain ? "" : "fair-dotted"}`}
           >
             {totalLabel}
           </button>

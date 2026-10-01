@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ShimmerText } from "./Shimmer";
 
 export interface NewPinDialogProps {
   /** Masked PIN for context, e.g. "•••123". */
@@ -58,9 +59,9 @@ export function NewPinDialog({ pinMask, busy, onCancel, onConfirm }: NewPinDialo
             onClick={onConfirm}
             disabled={busy}
             data-testid="new-pin-confirm"
-            className="h-11 flex-1 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700 disabled:opacity-40"
+            className="h-11 relative flex-1 items-center justify-center rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700 disabled:opacity-40"
           >
-            Buat
+            {busy ? <ShimmerText label="Membuat..." className="h-4 w-16" /> : "Buat"}
           </button>
         </div>
       </div>

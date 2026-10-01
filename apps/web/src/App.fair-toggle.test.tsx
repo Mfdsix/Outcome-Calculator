@@ -243,6 +243,43 @@ describe("App — Fair Total Toggle (spec §Adv-5)", () => {
     });
   });
 
+  it("during fair loading shows shimmer, not ·raw", async () => {
+    const mainExpenses = [
+      { id: "e1", amount: 50_000, occurredAt: new Date().toISOString(), allocationType: "NONE" as const },
+      { id: "e2", amount: 700_000, occurredAt: new Date().toISOString(), allocationType: "WEEKLY" as const },
+    ];
+
+    // Expanded fetch (fair) hangs so we can inspect the loading state.
+    let firstFrom: string | null = null;
+    const hangingPromise = new Promise(() => {});
+    listMock.mockImplementation((from: string) => {
+      if (firstFrom === null) {
+        firstFrom = from;
+        return Promise.resolve({ expenses: mainExpenses, total: 750_000 });
+      }
+      if (from < firstFrom) {
+        return hangingPromise as never;
+      }
+      return Promise.resolve({ expenses: mainExpenses, total: 750_000 });
+    });
+
+    const user = await renderUnlocked();
+
+    await screen.findByTestId("header-total");
+
+    // Click → fair fetch starts (in-flight, hanging)
+    await user.click(screen.getByTestId("header-total"));
+
+    // While loading: header-total shows shimmer (role=status aria-busy),
+    // NOT the ·raw badge and NOT a numeric value.
+    await waitFor(() => {
+      const total = screen.getByTestId("header-total");
+      expect(total).toHaveAttribute("role", "status");
+      expect(total).toHaveAttribute("aria-busy", "true");
+      expect(total).not.toHaveTextContent("·raw");
+    });
+  });
+
   it("persists toggle mode across reload", async () => {
     // Need allocation so the amount is clickable
     const expenses = [

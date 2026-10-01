@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { PIN_LENGTH } from "@expense-app/shared";
+import { ShimmerText } from "./Shimmer";
 
 export interface DeleteAccountDialogProps {
   busy: boolean;
@@ -125,9 +126,9 @@ export function DeleteAccountDialog({ busy, error, onCancel, onConfirm }: Delete
             onClick={() => onConfirm(pin)}
             disabled={!valid || busy}
             data-testid="delete-account-confirm"
-            className="h-11 flex-1 rounded-lg bg-red-600 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-40"
+            className="h-11 relative flex-1 items-center justify-center rounded-lg bg-red-600 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-40"
           >
-            Hapus Akun
+            {busy ? <ShimmerText label="Menghapus..." className="h-4 w-16" /> : "Hapus Akun"}
           </button>
         </div>
       </div>

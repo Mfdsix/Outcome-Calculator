@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ShimmerText } from "./Shimmer";
 
 export interface DeleteDialogProps {
   amountLabel: string;
@@ -47,9 +48,9 @@ export function DeleteDialog({ amountLabel, busy, onCancel, onConfirm }: DeleteD
             onClick={onConfirm}
             disabled={busy}
             data-testid="delete-confirm"
-            className="h-11 flex-1 rounded-lg bg-red-600 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-40"
+            className="h-11 relative flex-1 items-center justify-center rounded-lg bg-red-600 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-40"
           >
-            Delete
+            {busy ? <ShimmerText label="Menghapus..." className="h-4 w-16" /> : "Delete"}
           </button>
         </div>
       </div>

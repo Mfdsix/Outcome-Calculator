@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ShimmerText } from "./Shimmer";
 
 export interface UpdateDialogProps {
   fromLabel: string;
@@ -53,9 +54,9 @@ export function UpdateDialog({ fromLabel, toLabel, busy, onCancel, onConfirm }: 
             onClick={onConfirm}
             disabled={busy}
             data-testid="update-confirm"
-            className="h-11 flex-1 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700 disabled:opacity-40"
+            className="h-11 relative flex-1 items-center justify-center rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700 disabled:opacity-40"
           >
-            Update
+            {busy ? <ShimmerText label="Memperbarui..." className="h-4 w-20" /> : "Update"}
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { formatIDR, formatIDRAbbreviated } from "../lib/currency";
 import type { ChartBucket } from "../lib/chart";
 import { useChartMode } from "../lib/chartMode";
 import { ChartModeToggle } from "./ChartModeToggle";
+import { ShimmerChart } from "./Shimmer";
 
 export interface BarChartProps {
   buckets: ChartBucket[];
@@ -20,6 +21,8 @@ export interface BarChartProps {
    * (via endKey) so their threshold is cap × 2.
    */
   overCap?: number | null;
+  /** When true and buckets are empty, show a shimmer instead of nothing. */
+  loading?: boolean;
 }
 
 /** Civil "YYYY-MM-DD" → UTC millis (for bucket day-count math). */
@@ -54,12 +57,16 @@ function bucketThreshold(bucket: ChartBucket, overCap: number | null): number | 
  * highlighted in emerald by default; when `selectedKey` is provided browse
  * selection takes over highlighting. Pure CSS/SVG — no chart library.
  */
-export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = null, overCap = null }: BarChartProps) {
+export function BarChart({ buckets, selectedKey, onSelect, title, budgetDelta = null, overCap = null, loading = false }: BarChartProps) {
   // Persisted bar ↔ line preference (same pattern as theme state).
   const [chartMode, toggleChartMode] = useChartMode("expense-app.chart-mode", "bar");
   const lineMode = chartMode === "line";
 
-  if (buckets.length === 0) return null;
+  // While loading with no data yet, show a shimmer chart instead of nothing.
+  if (buckets.length === 0) {
+    if (loading) return <ShimmerChart testid="bar-chart-loading" label="Memuat grafik" className="h-24 w-full" />;
+    return null;
+  }
 
   const max = Math.max(0, ...buckets.map((bucket) => bucket.total));
   const hasData = max > 0;
