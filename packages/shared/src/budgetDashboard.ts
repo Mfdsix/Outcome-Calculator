@@ -214,6 +214,131 @@ function computeStreak(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Win streak (plan §5: "Winstreak")
+// ---------------------------------------------------------------------------
+
+/** A run of consecutive win days (delta >= 0) — always ends at today. */
+export interface WinRun {
+  /** Inclusive start date (YYYY-MM-DD). */
+  startDate: string;
+  /** Inclusive end date (YYYY-MM-DD). Always the last index in the run. */
+  endDate: string;
+  /** Number of days in the run. */
+  count: number;
+  /** Total saved = Σ delta across the run. */
+  saving: number;
+  /** Index of the end day within the series. */
+  endIndex: number;
+}
+
+/** Win-streak computation result. All fields are null when there's nothing
+ * to show (no active budget, today over budget with no prior wins, etc.). */
+export interface WinStreakResult {
+  /** Current run ending today — may be a single day (count 1). live=true
+   * because today is still in progress and the run can break intraday. */
+  current: WinRun | null;
+  /** Longest run in history, regardless of whether it touches today. */
+  longest: WinRun | null;
+  /** Run with the largest cumulative saving (Σ delta), regardless of length. */
+  biggestSaving: WinRun | null;
+}
+
+/**
+ * Compute win streaks from a daily-delta series.
+ *
+ * A "win" is a day with delta >= 0 (spent ≤ cap). Runs of wins are maximal
+ * consecutive sequences of win days; an over day (delta < 0) breaks a run.
+ *
+ * - current: the run ending today (may be 1 day when today is the only win).
+ *   live=true is conveyed by the caller via `todayKey`; this function only
+ *   returns the run shape, and the caller tags it live.
+ * - longest: the longest run anywhere in the series.
+ * - biggestSaving: the run with the largest Σ delta (saving).
+ *
+ * Only meaningful for daily budgets (the series is DailyDelta[]). For
+ * full budgets the caller should not invoke this (days lack delta).
+ */
+export function computeWinStreaks(
+  days: DailyDelta[],
+  todayKey: string,
+): WinStreakResult {
+  if (days.length === 0) return { current: null, longest: null, biggestSaving: null };
+
+  // Build all maximal runs of consecutive win days.
+  const runs: WinRun[] = [];
+  let runStart: number | null = null;
+  let runSum = 0;
+
+  for (let i = 0; i < days.length; i++) {
+    const delta = days[i]?.delta;
+    if (delta === undefined) break;
+    if (delta >= 0) {
+      if (runStart === null) {
+        runStart = i;
+        runSum = 0;
+      }
+      runSum += delta;
+    } else {
+      if (runStart !== null) {
+        const endIndex = i - 1;
+        const start = days[runStart]!;
+        const end = days[endIndex]!;
+        runs.push({
+          startDate: start.date,
+          endDate: end.date,
+          count: endIndex - runStart + 1,
+          saving: runSum,
+          endIndex,
+        });
+        runStart = null;
+        runSum = 0;
+      }
+    }
+  }
+  // Close any trailing run that reaches the end of the series.
+  if (runStart !== null) {
+    const endIndex = days.length - 1;
+    const start = days[runStart]!;
+    const end = days[endIndex]!;
+    runs.push({
+      startDate: start.date,
+      endDate: end.date,
+      count: endIndex - runStart + 1,
+      saving: runSum,
+      endIndex,
+    });
+  }
+
+  if (runs.length === 0) return { current: null, longest: null, biggestSaving: null };
+
+  // Current = run whose endIndex is the last day AND that last day is today.
+  const lastDay = days[days.length - 1];
+  let current: WinRun | null = null;
+  if (lastDay && lastDay.date === todayKey) {
+    for (const run of runs) {
+      if (run.endIndex === days.length - 1) {
+        current = run;
+        break;
+      }
+    }
+  }
+
+  // Longest run (ties → first/longest found).
+  let longest = runs[0]!;
+  for (let i = 1; i < runs.length; i++) {
+    if (runs[i]!.count > longest.count) longest = runs[i]!;
+  }
+
+  // Biggest saving run (Σ delta).
+  let biggestSaving = runs[0]!;
+  for (let i = 1; i < runs.length; i++) {
+    if (runs[i]!.saving > biggestSaving.saving) biggestSaving = runs[i]!;
+  }
+
+  return { current, longest, biggestSaving };
+}
+
 /**
  * Build the full dashboard data from a sparse server series + the active budget
  * snapshot. Zero-fills, computes deltas, and derives period position.

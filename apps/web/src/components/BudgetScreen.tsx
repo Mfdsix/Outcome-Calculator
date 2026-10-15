@@ -2,22 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type {
-  BudgetActiveResponse,
-  BudgetHistoryItem,
-  BudgetStatus,
-  BudgetType,
-  CreateBudgetPayload,
-  BudgetDayPoint,
-  SuggestedCopyDates,
+   BudgetActiveResponse,
+   BudgetHistoryItem,
+   BudgetStatus,
+   BudgetType,
+   CreateBudgetPayload,
+   BudgetDayPoint,
+   SuggestedCopyDates,
+   WinStreakResult,
 } from "@expense-app/shared";
 import {
-  buildDashboardData,
-  civilToday,
-  digitsToAmount,
-  formatIDR,
-  normalizeDigits,
-  suggestCopyDates,
-  formatDateShort,
+   buildDashboardData,
+   civilToday,
+   digitsToAmount,
+   formatIDR,
+   normalizeDigits,
+   suggestCopyDates,
+   formatDateShort,
 } from "@expense-app/shared";
 import type { BudgetDashboardData } from "@expense-app/shared";
 import type { FairBreakdown } from "@expense-app/shared";
@@ -28,6 +29,7 @@ import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { FairInfoButton } from "./FairBreakdown";
 import { ShimmerCard, ShimmerRows, ShimmerText } from "./Shimmer";
+import { WinStreakCard } from "./WinStreakCard";
 import type { TotalMode } from "../hooks/useTotalMode";
 import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
@@ -59,6 +61,12 @@ export interface BudgetScreenProps {
   /** Civil day key (YYYY-MM-DD) the user is viewing, forwarded to the [?] dialog
    * so allocation rows can show their window end + remaining days. */
   budgetTodayFairInfoDayKey?: string | null;
+  /** Pre-computed dashboard data from AppBody (plan §5). When not provided,
+   * BudgetScreen falls back to computing it internally so existing tests
+   * and stories keep working. */
+  dashboardData?: BudgetDashboardData | null;
+  /** Pre-computed win streaks from AppBody (plan §5). */
+  winStreaks?: WinStreakResult | null;
 }
 
 interface PrefillState {
@@ -87,7 +95,7 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel, budgetTodayFairInfoDayKey }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel, budgetTodayFairInfoDayKey, dashboardData: dashboardDataProp, winStreaks: winStreaksProp }: BudgetScreenProps) {
   /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
   const nowISO = useMemo(() => new Date().toISOString(), []);
@@ -164,8 +172,10 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
   /** Finished: period fully past today → gray card + "Buat yang baru". */
   const finished = active !== null && active.endDate < todayISO;
 
-  /** Dashboard data (zero-fill + deltas + pace) — derived from series. */
+  /** Dashboard data (zero-fill + deltas + pace) — derived from series.
+   * Falls back to internal computation when not passed via props (plan §5). */
   const dashboard = useMemo<BudgetDashboardData | null>(() => {
+    if (dashboardDataProp !== undefined) return dashboardDataProp;
     if (active === null || series === null) return null;
     return buildDashboardData(
       {
@@ -179,7 +189,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
       nowISO,
       APP_TIMEZONE,
     );
-  }, [active, series, nowISO]);
+  }, [active, series, nowISO, dashboardDataProp]);
 
   return (
     <>
@@ -224,7 +234,7 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           <>
             {!finished && dashboard !== null && (
               <>
-                {/* Layer 1: Today overview */}
+                 {/* Layer 1: Today overview */}
                  <BudgetToday
                    type={active.type}
                    amount={active.amount}
@@ -240,7 +250,18 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                    fairInfoDayKey={budgetTodayFairInfoDayKey ?? todayISO}
                  />
 
-                {/* Layer 2: Period card */}
+                 {/* Layer 1.5: Win streak card (plan §5) */}
+                 {winStreaksProp !== undefined &&
+                   winStreaksProp !== null &&
+                   active.type === "daily" &&
+                   dashboard !== null && (
+                     <WinStreakCard
+                       todayKey={todayISO}
+                       winStreaks={winStreaksProp}
+                     />
+                   )}
+
+                 {/* Layer 2: Period card */}
                 <BudgetPeriod
                   key={active.id}
                   dashboard={dashboard}

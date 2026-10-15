@@ -8,8 +8,10 @@ import {
   addCivilDays,
   zonedWallTimeToUtc,
   buildBudgetSnapshot,
+  buildDashboardData,
+  computeWinStreaks,
 } from "@expense-app/shared";
-import type { AllocationType, ExpenseDto } from "@expense-app/shared";
+import type { AllocationType, ExpenseDto, WinStreakResult, BudgetDashboardData } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
 import { GraphSection } from "../components/GraphSection";
@@ -32,6 +34,8 @@ import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UpdateBanner } from "../components/UpdateBanner";
 import { UserMenu } from "../components/UserMenu";
+import { WinStreakCard } from "../components/WinStreakCard";
+import { WinStreakChip } from "../components/WinStreakChip";
 import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
 import { useExpenses } from "../hooks/useExpenses";
@@ -529,6 +533,7 @@ function AppBody({ logout }: { logout: () => void }) {
 
   /** Current time reference for relative day labels (recomputed each render). */
   const now = useMemo(() => new Date(), []);
+  const nowISO = now.toISOString();
   /** Civil day key for "hari ini" (when not in focused W/M day scope). */
   const todayKey = useMemo(() => dayKeyOf(getZonedParts(now, APP_TIMEZONE)), [now]);
 
@@ -1108,6 +1113,39 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   }, [budget.active, focusedDayRange, expenses]);
 
   const effectiveBudgetSnapshot = focusedDayKey !== null ? focusedBudgetSnapshot : budgetSnapshot;
+
+  /**
+   * Budget dashboard data (plan §5: Win streak). Computed once in AppBody so
+   * both the home chip and the BudgetScreen card share the same data without
+   * a second fetch. Only for daily active budgets with a loaded series.
+   */
+  const dashboardData = useMemo<BudgetDashboardData | null>(() => {
+    if (budget.active === null || budget.series === null) return null;
+    return buildDashboardData(
+      {
+        type: budget.active.type,
+        amount: budget.active.amount,
+        startDate: budget.active.startDate,
+        endDate: budget.active.endDate,
+        todaySpent: budget.active.todaySpent,
+      },
+      budget.series,
+      nowISO,
+      APP_TIMEZONE,
+    );
+  }, [budget.active, budget.series, nowISO]);
+
+  /**
+   * Win streaks derived from the dashboard days. Only computed for daily
+   * budgets — computeWinStreaks checks the series type via the daily deltas
+   * that buildDashboardData already produces.
+   */
+  const winStreaks = useMemo<WinStreakResult | null>(() => {
+    if (dashboardData === null) return null;
+    if (dashboardData.type !== "daily") return null;
+    const dailyDays = dashboardData.days as Array<{ date: string; total: number; delta: number }>;
+    return computeWinStreaks(dailyDays, todayKey);
+  }, [dashboardData, todayKey]);
 
   /**
    * Selection key fed to BarChart. In bucket-facing modes (W/M summary) the
@@ -1778,36 +1816,48 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       {isHomeScreen && (
         <>
-          {insightTickerVisible && (
+           {insightTickerVisible && (
             <InsightTicker insights={insights} onOpen={openInsight} />
-          )}
+           )}
 
-          <AmountDisplay
-            display={calc.display}
-            editing={calc.isEditing}
-            flash={flash}
-          />
+           {/* Win streak chip (plan §5) — only for daily active budgets with series */}
+           {winStreaks !== null && budget.active?.type === "daily" && (
+             <WinStreakChip
+               todayKey={todayKey}
+               seriesLoading={budget.seriesLoading}
+               winStreaks={winStreaks}
+               onClick={openBudget}
+             />
+           )}
+
+           <AmountDisplay
+             display={calc.display}
+             editing={calc.isEditing}
+             flash={flash}
+           />
         </>
       )}
 
-      {isBudget ? (
-        <BudgetScreen
-          active={budget.active}
-          history={budget.history}
-          loading={budget.loading}
-          onBack={closeBudget}
-          onCreate={handleBudgetCreate}
-          onRemove={handleBudgetRemove}
-          series={budget.series}
-          seriesLoading={budget.seriesLoading}
-          budgetTodayMode={budgetTodayMode}
-          onToggleBudgetTodayMode={toggleBudgetTodayMode}
-           budgetTodaySpentFair={budgetFairTotal}
-           budgetTodayLoading={budgetFairLoading}
-           budgetTodayFairFallback={budgetTodayFairFallback}
-           budgetTodayFairBreakdown={budgetFairBreakdown}
-           budgetTodayFairInfoLabel="Rincian fair — Hari ini"
-         />
+       {isBudget ? (
+         <BudgetScreen
+           active={budget.active}
+           history={budget.history}
+           loading={budget.loading}
+           onBack={closeBudget}
+           onCreate={handleBudgetCreate}
+           onRemove={handleBudgetRemove}
+           series={budget.series}
+           seriesLoading={budget.seriesLoading}
+           budgetTodayMode={budgetTodayMode}
+           onToggleBudgetTodayMode={toggleBudgetTodayMode}
+            budgetTodaySpentFair={budgetFairTotal}
+            budgetTodayLoading={budgetFairLoading}
+            budgetTodayFairFallback={budgetTodayFairFallback}
+            budgetTodayFairBreakdown={budgetFairBreakdown}
+            budgetTodayFairInfoLabel="Rincian fair — Hari ini"
+            dashboardData={dashboardData}
+            winStreaks={winStreaks}
+          />
       ) : isInsight ? (
         <InsightScreen
           insights={insights}

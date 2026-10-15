@@ -6,8 +6,12 @@ import {
   periodPosition,
   buildDashboardData,
   STREAK_MIN_DAYS,
+  computeWinStreaks,
 } from "./budgetDashboard";
+import { addCivilDays } from "./periods";
+import { formatCivilDate } from "./budget";
 import type { BudgetDayPoint } from "./types";
+import type { DailyDelta } from "./budgetDashboard";
 
 describe("fillDaySeries", () => {
   it("zero-fills missing days between start and end", () => {
@@ -276,5 +280,127 @@ describe("periodPosition — signed position + guards", () => {
     const data = buildDashboardData(budget, [], nowISO, timeZone);
     expect(data.days).toHaveLength(0);
     expect(data.periodPosition.streak).toBeNull();
+  });
+});
+
+describe("computeWinStreaks", () => {
+  const cap = 50_000;
+
+  function deltas(totals: number[], startDate: string): DailyDelta[] {
+    const [y, m, d] = startDate.split("-").map(Number) as [number, number, number];
+    return totals.map((total, i) => {
+      const date = formatCivilDate(addCivilDays({ year: y, month: m, day: d }, i));
+      return { date, total, delta: cap - total };
+    });
+  }
+
+  it("empty series → all null", () => {
+    const result = computeWinStreaks([], "2026-09-03");
+    expect(result.current).toBeNull();
+    expect(result.longest).toBeNull();
+    expect(result.biggestSaving).toBeNull();
+  });
+
+  it("win streak of 3 ending today", () => {
+    const days = deltas([20_000, 30_000, 40_000], "2026-09-01");
+    // deltas: +30k, +20k, +10k — all under → 3-day win streak ending today
+    const result = computeWinStreaks(days, "2026-09-03");
+    expect(result.current).not.toBeNull();
+    expect(result.current!.count).toBe(3);
+    expect(result.current!.saving).toBe(60_000);
+    expect(result.current!.startDate).toBe("2026-09-01");
+    expect(result.current!.endDate).toBe("2026-09-03");
+    expect(result.longest).not.toBeNull();
+    expect(result.longest!.count).toBe(3);
+    expect(result.biggestSaving).not.toBeNull();
+    expect(result.biggestSaving!.saving).toBe(60_000);
+  });
+
+  it("single win day → current count is 1", () => {
+    // Yesterday over, today under.
+    const days = deltas([60_000, 40_000], "2026-09-01");
+    // Sep 1: delta -10k (over), Sep 2: delta +10k (win) → today is the only win
+    const result = computeWinStreaks(days, "2026-09-02");
+    expect(result.current).not.toBeNull();
+    expect(result.current!.count).toBe(1);
+    expect(result.current!.saving).toBe(10_000);
+    expect(result.current!.startDate).toBe("2026-09-02");
+    expect(result.current!.endDate).toBe("2026-09-02");
+  });
+
+  it("over today breaks the current streak but longest survives", () => {
+    // 3 wins, then today over → current is null, longest is 3.
+    const days = deltas([10_000, 20_000, 30_000, 60_000], "2026-09-01");
+    // Sep 1-3: win, Sep 4 (today): over
+    const result = computeWinStreaks(days, "2026-09-04");
+    expect(result.current).toBeNull();
+    expect(result.longest).not.toBeNull();
+    expect(result.longest!.count).toBe(3);
+    expect(result.longest!.startDate).toBe("2026-09-01");
+    expect(result.longest!.endDate).toBe("2026-09-03");
+  });
+
+  it("broken win: win → over → win → longest is 1, current is the last win", () => {
+    // Sep 1: win, Sep 2: over, Sep 3: win (today)
+    const days = deltas([10_000, 60_000, 40_000], "2026-09-01");
+    const result = computeWinStreaks(days, "2026-09-03");
+    expect(result.current).not.toBeNull();
+    expect(result.current!.count).toBe(1);
+    expect(result.current!.startDate).toBe("2026-09-03");
+    expect(result.longest).not.toBeNull();
+    expect(result.longest!.count).toBe(1);
+  });
+
+  it("biggestSaving is a different run than longest (not the same run)", () => {
+    // Run A: 2 days, small savings (2k + 2k = 4k)
+    // over day
+    // Run B: 4 days, large savings (10k × 4 = 40k)
+    // today is end of run B
+    const days = deltas(
+      [48_000, 48_000, 60_000, 40_000, 40_000, 40_000, 40_000],
+      "2026-09-01",
+    );
+    // Sep 1: win (+2k), Sep 2: win (+2k), Sep 3: over (-10k),
+    // Sep 4-7: win (+10k × 4 = 40k) — today = Sep 7
+    const result = computeWinStreaks(days, "2026-09-07");
+    expect(result.current).not.toBeNull();
+    expect(result.current!.count).toBe(4);
+    expect(result.longest!.count).toBe(4);
+    expect(result.biggestSaving!.saving).toBe(40_000);
+    // Both longest and biggestSaving are the same run here, but let's
+    // construct a case where they differ.
+  });
+
+  it("biggestSaving ≠ longest when a short run has more saving", () => {
+    // Run A: 4 days, each saving 1k → total 4k (longest by count)
+    // over
+    // Run B: 1 day, saving 20k (biggest saving, not longest)
+    const days = deltas(
+      [49_000, 49_000, 49_000, 49_000, 60_000, 30_000],
+      "2026-09-01",
+    );
+    // Sep 1-4: win (+1k each = 4k), Sep 5: over, Sep 6: win (+20k, today)
+    const result = computeWinStreaks(days, "2026-09-06");
+    expect(result.longest!.count).toBe(4);
+    expect(result.longest!.startDate).toBe("2026-09-01");
+    expect(result.biggestSaving!.saving).toBe(20_000);
+    expect(result.biggestSaving!.count).toBe(1);
+    expect(result.biggestSaving!.startDate).toBe("2026-09-06");
+  });
+
+  it("today not in series → current is null", () => {
+    const days = deltas([10_000, 20_000, 30_000], "2026-09-01");
+    const result = computeWinStreaks(days, "2026-09-15");
+    expect(result.current).toBeNull();
+    // But longest still records the run.
+    expect(result.longest!.count).toBe(3);
+  });
+
+  it("all over days → all null", () => {
+    const days = deltas([60_000, 70_000, 80_000], "2026-09-01");
+    const result = computeWinStreaks(days, "2026-09-03");
+    expect(result.current).toBeNull();
+    expect(result.longest).toBeNull();
+    expect(result.biggestSaving).toBeNull();
   });
 });
