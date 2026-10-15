@@ -29,15 +29,6 @@ function formatRange(startDate: string, endDate: string): string {
   return start === end ? start : `${start} – ${end}`;
 }
 
-function formatRunDate(date: string): string {
-  const parts = date.split("-").map(Number) as [number, number, number];
-  const [y, m, d] = parts;
-  return formatDateShort(
-    new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1, 12)),
-    APP_TIMEZONE,
-  );
-}
-
 /**
  * Win streak detail dialog (plan §5). Shows the current live run (with the
  * "Hari ini berjalan" badge), the longest recorded run, and the run with the

@@ -171,7 +171,7 @@ describe("App — win streak chip on home screen (plan §5)", () => {
     });
   });
 
-  it("today over → current null, longest shows in chip count", async () => {
+  it("today over → chip shows 'streak putus' (greyed, no 🔥), dialog shows longest record", async () => {
     getActiveMock.mockResolvedValue(
       activeBudget({ startDate: twoDaysAgo, endDate: end, todaySpent: 60_000, status: "over" }),
     );
@@ -183,12 +183,20 @@ describe("App — win streak chip on home screen (plan §5)", () => {
       ],
     });
 
-    await renderUnlocked();
+    const user = await renderUnlocked();
 
     const chip = await screen.findByTestId("winstreak-chip");
     expect(chip).toBeInTheDocument();
+    // Streak broken: chip shows "streak putus" without 🔥 icon
     await waitFor(() => {
-      expect(screen.getByTestId("winstreak-count")).toHaveTextContent("2");
+      expect(screen.getByTestId("winstreak-count")).toHaveTextContent("streak putus");
     });
+    // No fire icon in broken state
+    expect(chip.querySelector("span[aria-hidden='true']")).toBeNull();
+
+    // Dialog still shows longest record
+    await user.click(chip);
+    await screen.findByTestId("winstreak-dialog");
+    expect(screen.getAllByText("Rekor terlama")[0]).toBeInTheDocument();
   });
 });

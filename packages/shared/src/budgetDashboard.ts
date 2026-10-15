@@ -272,7 +272,7 @@ export function computeWinStreaks(
 
   for (let i = 0; i < days.length; i++) {
     const delta = days[i]?.delta;
-    if (delta === undefined) break;
+    if (delta === undefined) continue;
     if (delta >= 0) {
       if (runStart === null) {
         runStart = i;

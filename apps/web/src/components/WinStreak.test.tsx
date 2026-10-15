@@ -38,7 +38,6 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={false}
         winStreaks={winStreaks}
-        onClick={() => {}}
       />,
     );
 
@@ -54,7 +53,6 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={true}
         winStreaks={winStreaks}
-        onClick={() => {}}
       />,
     );
 
@@ -68,7 +66,6 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={false}
         winStreaks={null}
-        onClick={() => {}}
       />,
     );
     expect(container).toBeEmptyDOMElement();
@@ -83,7 +80,6 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={false}
         winStreaks={winStreaks}
-        onClick={() => {}}
       />,
     );
 
@@ -107,7 +103,6 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={false}
         winStreaks={winStreaks}
-        onClick={() => {}}
       />,
     );
 
@@ -121,7 +116,7 @@ describe("WinStreakChip", () => {
     });
   });
 
-  it("today over → current null, longest shows but no live badge", async () => {
+  it("today over → current null, chip shows 'streak putus' without 🔥", async () => {
     const user = userEvent.setup();
     const winStreaks = compute(STREAK_WITH_OVER_TODAY);
     render(
@@ -129,12 +124,13 @@ describe("WinStreakChip", () => {
         todayKey={TODAY}
         seriesLoading={false}
         winStreaks={winStreaks}
-        onClick={() => {}}
       />,
     );
 
-    // Current is null → chip shows longest count instead.
-    expect(screen.getByTestId("winstreak-count")).toHaveTextContent("2");
+    // Streak broken: chip shows "streak putus" without 🔥 icon
+    expect(screen.getByTestId("winstreak-count")).toHaveTextContent("streak putus");
+    const chip = screen.getByTestId("winstreak-chip");
+    expect(chip.querySelector("span[aria-hidden='true']")).toBeNull();
 
     await user.click(screen.getByTestId("winstreak-chip"));
     await screen.findByTestId("winstreak-dialog");

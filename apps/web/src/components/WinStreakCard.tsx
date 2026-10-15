@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 
 import { formatIDR } from "@expense-app/shared";
 import type { WinStreakResult } from "@expense-app/shared";
@@ -15,6 +14,14 @@ export interface WinStreakCardProps {
   detailLabel?: string;
 }
 
+function hasAnyStreak(winStreaks: WinStreakResult): boolean {
+  return (
+    winStreaks.current !== null ||
+    winStreaks.longest !== null ||
+    winStreaks.biggestSaving !== null
+  );
+}
+
 /**
  * Small Win streak section on the BudgetScreen, placed between BudgetToday
  * and BudgetPeriod (plan §5). Shows the current streak count + saving with
@@ -22,15 +29,6 @@ export interface WinStreakCardProps {
  */
 function WinStreakCardInner({ todayKey, winStreaks, detailLabel }: WinStreakCardProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  useEffect(() => {
-    if (!dialogOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDialogOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [dialogOpen]);
 
   return (
     <>
@@ -63,14 +61,15 @@ function WinStreakCardInner({ todayKey, winStreaks, detailLabel }: WinStreakCard
             >
               {winStreaks.current ? `${winStreaks.current.count} hari` : "Hari ini melewati batas"}
             </span>
-            {winStreaks.current?.endDate === todayKey && (
-              <span
-                data-testid="winstreak-card-live-badge"
-                className="inline-block rounded border border-emerald-800 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300"
-              >
-                Hari ini berjalan
-              </span>
-            )}
+            {winStreaks.current &&
+              winStreaks.current.endDate === todayKey && (
+                <span
+                  data-testid="winstreak-card-live-badge"
+                  className="inline-block rounded border border-emerald-800 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300"
+                >
+                  Hari ini berjalan
+                </span>
+              )}
           </div>
           <span
             data-testid="winstreak-card-saving"
@@ -81,24 +80,23 @@ function WinStreakCardInner({ todayKey, winStreaks, detailLabel }: WinStreakCard
         </div>
       </div>
 
-      {dialogOpen &&
-        createPortal(
-          <WinStreakDialog
-            winStreaks={winStreaks}
-            todayKey={todayKey}
-            onClose={() => setDialogOpen(false)}
-          />,
-          document.body,
-        )}
+      {dialogOpen && (
+        <WinStreakDialog
+          winStreaks={winStreaks}
+          todayKey={todayKey}
+          onClose={() => setDialogOpen(false)}
+        />
+      )}
     </>
   );
 }
 
 /**
  * WinStreakCard wrapper — only renders when winStreaks is non-null
- * (i.e. daily active budget with at least one run, or today over with history).
+ * and has at least one non-null streak field (i.e. daily active budget
+ * with at least one run, or today over with history).
  */
 export function WinStreakCard({ todayKey, winStreaks, detailLabel }: WinStreakCardProps) {
-  if (!winStreaks) return null;
+  if (!winStreaks || !hasAnyStreak(winStreaks)) return null;
   return <WinStreakCardInner todayKey={todayKey} winStreaks={winStreaks} detailLabel={detailLabel} />;
 }

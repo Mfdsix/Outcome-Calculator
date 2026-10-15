@@ -251,15 +251,18 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                  />
 
                  {/* Layer 1.5: Win streak card (plan §5) */}
-                 {winStreaksProp !== undefined &&
-                   winStreaksProp !== null &&
-                   active.type === "daily" &&
-                   dashboard !== null && (
-                     <WinStreakCard
-                       todayKey={todayISO}
-                       winStreaks={winStreaksProp}
-                     />
-                   )}
+                  {winStreaksProp !== undefined &&
+                    winStreaksProp !== null &&
+                    active.type === "daily" &&
+                    dashboard !== null &&
+                    (winStreaksProp.current !== null ||
+                      winStreaksProp.longest !== null ||
+                      winStreaksProp.biggestSaving !== null) && (
+                      <WinStreakCard
+                        todayKey={todayISO}
+                        winStreaks={winStreaksProp}
+                      />
+                    )}
 
                  {/* Layer 2: Period card */}
                 <BudgetPeriod

@@ -1820,15 +1820,18 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             <InsightTicker insights={insights} onOpen={openInsight} />
            )}
 
-           {/* Win streak chip (plan §5) — only for daily active budgets with series */}
-           {winStreaks !== null && budget.active?.type === "daily" && (
-             <WinStreakChip
-               todayKey={todayKey}
-               seriesLoading={budget.seriesLoading}
-               winStreaks={winStreaks}
-               onClick={openBudget}
-             />
-           )}
+            {/* Win streak chip (plan §5) — only for daily active budgets with series */}
+            {winStreaks !== null &&
+              budget.active?.type === "daily" &&
+              (winStreaks.current !== null ||
+                winStreaks.longest !== null ||
+                winStreaks.biggestSaving !== null) && (
+              <WinStreakChip
+                todayKey={todayKey}
+                seriesLoading={budget.seriesLoading}
+                winStreaks={winStreaks}
+              />
+            )}
 
            <AmountDisplay
              display={calc.display}
