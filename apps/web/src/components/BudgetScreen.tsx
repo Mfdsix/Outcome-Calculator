@@ -29,7 +29,7 @@ import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { FairInfoButton } from "./FairBreakdown";
 import { ShimmerCard, ShimmerRows, ShimmerText } from "./Shimmer";
-import { WinStreakCard } from "./WinStreakCard";
+import { WinStreakChip } from "./WinStreakChip";
 import type { TotalMode } from "../hooks/useTotalMode";
 import { useChartMode } from "../lib/chartMode";
 import { APP_TIMEZONE } from "../lib/periods";
@@ -234,37 +234,26 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
           <>
             {!finished && dashboard !== null && (
               <>
-                 {/* Layer 1: Today overview */}
-                 <BudgetToday
-                   type={active.type}
-                   amount={active.amount}
-                   todaySpent={active.todaySpent}
-                   status={active.status}
-                   todayMode={budgetTodayMode}
-                   onToggleTodayMode={onToggleBudgetTodayMode}
-                   todaySpentFair={budgetTodaySpentFair}
-                   todayLoading={budgetTodayLoading}
-                   fairFallback={budgetTodayFairFallback}
-                   fairBreakdown={budgetTodayFairBreakdown}
-                   fairInfoLabel={budgetTodayFairInfoLabel}
-                   fairInfoDayKey={budgetTodayFairInfoDayKey ?? todayISO}
-                 />
+                  {/* Layer 1: Today overview (win badge lives in its header row) */}
+                  <BudgetToday
+                    type={active.type}
+                    amount={active.amount}
+                    todaySpent={active.todaySpent}
+                    status={active.status}
+                    todayMode={budgetTodayMode}
+                    onToggleTodayMode={onToggleBudgetTodayMode}
+                    todaySpentFair={budgetTodaySpentFair}
+                    todayLoading={budgetTodayLoading}
+                    fairFallback={budgetTodayFairFallback}
+                    fairBreakdown={budgetTodayFairBreakdown}
+                    fairInfoLabel={budgetTodayFairInfoLabel}
+                    fairInfoDayKey={budgetTodayFairInfoDayKey ?? todayISO}
+                    winStreaks={winStreaksProp ?? null}
+                    winSeriesLoading={seriesLoading}
+                    winTodayKey={todayISO}
+                  />
 
-                 {/* Layer 1.5: Win streak card (plan §5) */}
-                  {winStreaksProp !== undefined &&
-                    winStreaksProp !== null &&
-                    active.type === "daily" &&
-                    dashboard !== null &&
-                    (winStreaksProp.current !== null ||
-                      winStreaksProp.longest !== null ||
-                      winStreaksProp.biggestSaving !== null) && (
-                      <WinStreakCard
-                        todayKey={todayISO}
-                        winStreaks={winStreaksProp}
-                      />
-                    )}
-
-                 {/* Layer 2: Period card */}
+                  {/* Layer 2: Period card */}
                 <BudgetPeriod
                   key={active.id}
                   dashboard={dashboard}
@@ -578,6 +567,9 @@ function BudgetToday({
   fairBreakdown,
   fairInfoLabel,
   fairInfoDayKey,
+  winStreaks,
+  winSeriesLoading,
+  winTodayKey,
 }: {
   type: BudgetType;
   amount: number;
@@ -593,6 +585,10 @@ function BudgetToday({
   fairInfoLabel?: string;
   /** Civil day key forwarded to the [?] dialog for remaining-days text. */
   fairInfoDayKey?: string | null;
+  /** Win streaks for the [Hari ini][badge] header row (daily only). */
+  winStreaks?: WinStreakResult | null;
+  winSeriesLoading?: boolean;
+  winTodayKey?: string;
 }) {
   const isDaily = type === "daily";
   const cap = amount;
@@ -617,8 +613,22 @@ function BudgetToday({
     >
       <div className="pointer-events-none absolute -mr-10 -mt-10 right-0 top-0 h-24 w-24 rounded-full bg-emerald-500/5 blur-2xl" />
       <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-widest text-neutral-500">
-          Hari ini
+        <span className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-widest text-neutral-500">
+            Hari ini
+          </span>
+          {isDaily &&
+            winStreaks !== undefined &&
+            winStreaks !== null &&
+            (winStreaks.current !== null ||
+              winStreaks.longest !== null ||
+              winStreaks.biggestSaving !== null) && (
+              <WinStreakChip
+                todayKey={winTodayKey ?? ""}
+                seriesLoading={winSeriesLoading ?? false}
+                winStreaks={winStreaks}
+              />
+            )}
         </span>
         <span
           data-testid="budget-today-status"

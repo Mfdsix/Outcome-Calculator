@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsup src/server.ts --format esm --out-dir dist --target node20",
+    "build": "tsup src/server.ts --format esm --outDir dist --target node20",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:push": "prisma db push",
     "db:adopt": "tsx prisma/adopt.ts",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-winstreak": "tsx prisma/seed-winstreak.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {

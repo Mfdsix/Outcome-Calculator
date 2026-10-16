@@ -34,7 +34,6 @@ import { UnsavedDialog } from "../components/UnsavedDialog";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { UpdateBanner } from "../components/UpdateBanner";
 import { UserMenu } from "../components/UserMenu";
-import { WinStreakCard } from "../components/WinStreakCard";
 import { WinStreakChip } from "../components/WinStreakChip";
 import { useBudget } from "../hooks/useBudget";
 import { useCalculator } from "../hooks/useCalculator";
@@ -1758,7 +1757,21 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           periodLabel={effectivePeriodLabel}
           totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
           status={
-            <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+            <>
+              <ConnIndicator online={online} syncing={syncing} pending={pending} cached={showingCachedDay} />
+              {/* Win streak badge — [period][conn][streak] in the header left cluster */}
+              {winStreaks !== null &&
+                budget.active?.type === "daily" &&
+                (winStreaks.current !== null ||
+                  winStreaks.longest !== null ||
+                  winStreaks.biggestSaving !== null) && (
+                  <WinStreakChip
+                    todayKey={todayKey}
+                    seriesLoading={budget.seriesLoading}
+                    winStreaks={winStreaks}
+                  />
+                )}
+            </>
           }
           totalClickable={totalClickableExtended}
           totalFairActive={headerFairPressed}
@@ -1819,19 +1832,6 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
            {insightTickerVisible && (
             <InsightTicker insights={insights} onOpen={openInsight} />
            )}
-
-            {/* Win streak chip (plan §5) — only for daily active budgets with series */}
-            {winStreaks !== null &&
-              budget.active?.type === "daily" &&
-              (winStreaks.current !== null ||
-                winStreaks.longest !== null ||
-                winStreaks.biggestSaving !== null) && (
-              <WinStreakChip
-                todayKey={todayKey}
-                seriesLoading={budget.seriesLoading}
-                winStreaks={winStreaks}
-              />
-            )}
 
            <AmountDisplay
              display={calc.display}
