@@ -5,6 +5,7 @@ export * from "./types";
 export * from "./auth";
 export * from "./budget";
 export * from "./budgetDashboard";
+export * from "./budgetForecast";
 export * from "./insights";
 export * from "./budgetSnapshot";
 export * from "./allocation";

@@ -1,12 +1,29 @@
 import type { BudgetSeriesDay, BudgetType } from "@expense-app/shared";
+import { addDaysToCivil } from "@expense-app/shared";
 
 import { formatIDR } from "../lib/currency";
+
+/** Projection overlay for the ACTIVE budget (wireframe §5c). */
+export interface ChartProjection {
+  /** Average spend per elapsed day. */
+  avgPerDay: number;
+  /** Days after today (clamped ≥ 0). */
+  remainingDays: number;
+  /** Inclusive last civil date of the range (YYYY-MM-DD). */
+  endDate: string;
+  /** Cap: daily allowance (daily) or whole-range amount (full). */
+  cap: number;
+  /** Full only: expected total for the caption (matches ForecastBar). */
+  projectedTotal?: number | null;
+}
 
 export interface BudgetPeriodChartProps {
   days: BudgetSeriesDay[];
   type: BudgetType;
   /** Explicit override from the persisted toggle; absent = auto by day count. */
   forceMode?: "bar" | "line";
+  /** Active-budget projection; absent = plain actual-only chart (no change). */
+  projection?: ChartProjection;
 }
 
 /** At/above this many days the bars auto-transform into an up-down line chart. */
@@ -29,6 +46,57 @@ function ChartFooter({ first }: { first: string }) {
   );
 }
 
+function ChartCaption({ projection }: { projection: ChartProjection }) {
+  if (projection.projectedTotal === null || projection.projectedTotal === undefined) return null;
+  return (
+    <p
+      data-testid="budget-chart-caption"
+      className="mt-1 px-1 text-[10px] text-neutral-500"
+    >
+      sisa {projection.remainingDays} hari × {formatIDR(projection.avgPerDay)} → proyeksi{" "}
+      {formatIDR(projection.projectedTotal)}
+    </p>
+  );
+}
+
+/** Future civil dates for the ghost bars (one per remaining day). */
+function ghostDates(days: BudgetSeriesDay[], projection: ChartProjection): string[] {
+  const last = days[days.length - 1];
+  if (!last || projection.remainingDays <= 0) return [];
+  return Array.from({ length: projection.remainingDays }, (_, index) =>
+    addDaysToCivil(last.date, index + 1),
+  );
+}
+
+/** One ghost bar (dashed border, transparent fill) for a future day. */
+function GhostBar({
+  date,
+  value,
+  maxAbs,
+  tone,
+  rounded,
+}: {
+  date: string;
+  value: number;
+  maxAbs: number;
+  tone: "emerald" | "red";
+  rounded: "top" | "bottom";
+}) {
+  const heightPct = (Math.abs(value) / maxAbs) * 100;
+  const color =
+    tone === "emerald"
+      ? "border-emerald-500/70 bg-emerald-500/5"
+      : "border-red-500/70 bg-red-500/5";
+  return (
+    <div
+      data-testid={`budget-chart-ghost-${date}`}
+      title={`${date}: proyeksi ${value >= 0 ? "+" : "−"}${formatIDR(Math.abs(value))}`}
+      className={`w-full border border-dashed ${color} ${rounded === "top" ? "rounded-t-sm" : "rounded-b-sm"}`}
+      style={{ height: `${heightPct}%` }}
+    />
+  );
+}
+
 /**
  * Diverging bar chart for the period position (mock §C).
  *
@@ -41,26 +109,56 @@ function ChartFooter({ first }: { first: string }) {
  * auto-transform into an up-down SVG line chart (same zero-line semantics,
  * per-segment emerald/red coloring) so long periods stay readable without
  * horizontal scrolling.
+ *
+ * A `projection` overlay (active budgets only) adds ghost bars + a dashed
+ * line for the remaining days; solid always means actual.
  */
-export function BudgetPeriodChart({ days, type, forceMode }: BudgetPeriodChartProps) {
+export function BudgetPeriodChart({ days, type, forceMode, projection }: BudgetPeriodChartProps) {
   if (days.length === 0) {
     return null;
   }
 
   const isDaily = type === "daily";
+  const projectedLabel = projection ? " termasuk proyeksi" : "";
 
   if (isDaily) {
     const deltas = days as Array<{ date: string; total: number; delta: number }>;
     if (forceMode ? forceMode === "line" : deltas.length >= PERIOD_CHART_LINE_MIN_DAYS) {
-      return <DailyLineChart deltas={deltas} />;
+      return <DailyLineChart deltas={deltas} projection={projection} />;
     }
-    const maxAbs = Math.max(...deltas.map((d) => Math.abs(d.delta)), 1);
+    const level = projection ? projection.cap - projection.avgPerDay : 0;
+    const maxAbs = Math.max(
+      ...deltas.map((d) => Math.abs(d.delta)),
+      projection ? Math.abs(level) : 0,
+      1,
+    );
+    const ghosts = projection ? ghostDates(days, projection) : [];
+    const totalSlots = deltas.length + ghosts.length;
 
     return (
-      <div className="relative py-2" data-testid="budget-period-chart" role="img" aria-label="Grafik harian periode budget">
+      <div
+        className="relative py-2"
+        data-testid="budget-period-chart"
+        role="img"
+        aria-label={`Grafik harian periode budget${projectedLabel}`}
+      >
         <div className="relative h-24 w-full">
           {/* Zero line */}
           <div className="absolute inset-x-0 top-1/2 z-0 h-px bg-neutral-700/60" />
+          {/* Dashed projection level across the remaining days */}
+          {projection && ghosts.length > 0 && (
+            <div
+              data-testid="budget-chart-projection-line"
+              aria-hidden="true"
+              className={`pointer-events-none absolute right-0 z-20 border-t border-dashed ${
+                level >= 0 ? "border-emerald-500/70" : "border-red-500/70"
+              }`}
+              style={{
+                left: `${(deltas.length / totalSlots) * 100}%`,
+                top: `${level >= 0 ? 50 - (Math.abs(level) / maxAbs) * 50 : 50 + (Math.abs(level) / maxAbs) * 50}%`,
+              }}
+            />
+          )}
           {/* Bars */}
           <div className="relative z-10 flex h-full items-stretch justify-between gap-1 overflow-x-auto px-1">
             {deltas.map((day) => {
@@ -103,6 +201,35 @@ export function BudgetPeriodChart({ days, type, forceMode }: BudgetPeriodChartPr
                 </div>
               );
             })}
+            {ghosts.map((date) => (
+              <div
+                key={date}
+                className="flex h-full w-3.5 shrink-0 flex-col justify-center opacity-70"
+              >
+                <div className="flex h-1/2 items-end pb-[1px]">
+                  {level > 0 && (
+                    <GhostBar
+                      date={date}
+                      value={level}
+                      maxAbs={maxAbs}
+                      tone="emerald"
+                      rounded="top"
+                    />
+                  )}
+                </div>
+                <div className="flex h-1/2 items-start pt-[1px]">
+                  {level < 0 && (
+                    <GhostBar
+                      date={date}
+                      value={level}
+                      maxAbs={maxAbs}
+                      tone="red"
+                      rounded="bottom"
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
         <ChartFooter first={deltas[0]?.date ?? ""} />
@@ -111,15 +238,40 @@ export function BudgetPeriodChart({ days, type, forceMode }: BudgetPeriodChartPr
   }
 
   const totals = days.map((d) => d.total);
+  const projectionValue = projection?.avgPerDay ?? 0;
   if (forceMode ? forceMode === "line" : totals.length >= PERIOD_CHART_LINE_MIN_DAYS) {
-    return <FullLineChart days={days} maxTotal={Math.max(...totals, 1)} />;
+    return (
+      <FullLineChart
+        days={days}
+        maxTotal={Math.max(...totals, projectionValue, 1)}
+        projection={projection}
+      />
+    );
   }
-  const maxTotal = Math.max(...totals, 1);
+  const maxTotal = Math.max(...totals, projectionValue, 1);
+  const ghosts = projection ? ghostDates(days, projection) : [];
+  const totalSlots = days.length + ghosts.length;
 
   return (
-    <div className="relative py-2" data-testid="budget-period-chart" role="img" aria-label="Grafik total harian periode budget">
+    <div
+      className="relative py-2"
+      data-testid="budget-period-chart"
+      role="img"
+      aria-label={`Grafik total harian periode budget${projectedLabel}`}
+    >
       <div className="relative h-24 w-full">
         <div className="absolute inset-x-0 top-1/2 z-0 h-px bg-neutral-700/60" />
+        {projection && ghosts.length > 0 && (
+          <div
+            data-testid="budget-chart-projection-line"
+            aria-hidden="true"
+            className="pointer-events-none absolute right-0 z-20 border-t border-dashed border-emerald-500/70"
+            style={{
+              left: `${(days.length / totalSlots) * 100}%`,
+              top: `${50 - (projectionValue / maxTotal) * 50}%`,
+            }}
+          />
+        )}
         <div className="relative z-10 flex h-full items-stretch justify-between gap-1 overflow-x-auto px-1">
           {days.map((day) => {
             const heightPct = (day.total / maxTotal) * 100;
@@ -144,9 +296,27 @@ export function BudgetPeriodChart({ days, type, forceMode }: BudgetPeriodChartPr
               </div>
             );
           })}
+          {ghosts.map((date) => (
+            <div
+              key={date}
+              className="flex h-full w-3.5 shrink-0 flex-col justify-center opacity-70"
+            >
+              <div className="flex h-1/2 items-end pb-[1px]">
+                <GhostBar
+                  date={date}
+                  value={projectionValue}
+                  maxAbs={maxTotal}
+                  tone="emerald"
+                  rounded="top"
+                />
+              </div>
+              <div className="flex h-1/2 items-start pt-[1px]" />
+            </div>
+          ))}
         </div>
       </div>
       <ChartFooter first={days[0]?.date ?? ""} />
+      {projection && <ChartCaption projection={projection} />}
     </div>
   );
 }
@@ -157,13 +327,33 @@ const LINE_MID = LINE_H / 2;
 const LINE_AMP = LINE_H / 2 - 2;
 
 /** Up-down line chart of daily deltas around the zero-line. */
-function DailyLineChart({ deltas }: { deltas: Array<{ date: string; total: number; delta: number }> }) {
-  const maxAbs = Math.max(...deltas.map((d) => Math.abs(d.delta)), 1);
-  const x = (i: number): number => (deltas.length === 1 ? LINE_W / 2 : (i / (deltas.length - 1)) * LINE_W);
+function DailyLineChart({
+  deltas,
+  projection,
+}: {
+  deltas: Array<{ date: string; total: number; delta: number }>;
+  projection?: ChartProjection;
+}) {
+  const level = projection ? projection.cap - projection.avgPerDay : 0;
+  const remaining = projection?.remainingDays ?? 0;
+  const maxAbs = Math.max(
+    ...deltas.map((d) => Math.abs(d.delta)),
+    projection ? Math.abs(level) : 0,
+    1,
+  );
+  const totalPoints = deltas.length + remaining;
+  const x = (i: number): number =>
+    totalPoints <= 1 ? LINE_W / 2 : (i / (totalPoints - 1)) * LINE_W;
   const y = (delta: number): number => LINE_MID - (delta / maxAbs) * LINE_AMP;
+  const projectedLabel = projection ? " termasuk proyeksi" : "";
 
   return (
-    <div className="relative py-2" data-testid="budget-period-chart" role="img" aria-label="Grafik garis harian periode budget">
+    <div
+      className="relative py-2"
+      data-testid="budget-period-chart"
+      role="img"
+      aria-label={`Grafik garis harian periode budget${projectedLabel}`}
+    >
       <svg
         viewBox={`0 0 ${LINE_W} ${LINE_H}`}
         preserveAspectRatio="none"
@@ -190,6 +380,21 @@ function DailyLineChart({ deltas }: { deltas: Array<{ date: string; total: numbe
             />
           );
         })}
+        {/* Dashed projection segment for the remaining days */}
+        {projection && remaining > 0 && (
+          <line
+            data-testid="budget-chart-projection-line"
+            x1={x(deltas.length - 1)}
+            y1={y(level)}
+            x2={x(totalPoints - 1)}
+            y2={y(level)}
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+            strokeDasharray="4 2"
+            className={level >= 0 ? "stroke-emerald-500/80" : "stroke-red-500/80"}
+          />
+        )}
         {/* Points */}
         {deltas.map((day, i) => (
           <circle
@@ -216,12 +421,30 @@ function DailyLineChart({ deltas }: { deltas: Array<{ date: string; total: numbe
 }
 
 /** Line chart of daily totals (full budgets — no daily allowance). */
-function FullLineChart({ days, maxTotal }: { days: BudgetSeriesDay[]; maxTotal: number }) {
-  const x = (i: number): number => (days.length === 1 ? LINE_W / 2 : (i / (days.length - 1)) * LINE_W);
+function FullLineChart({
+  days,
+  maxTotal,
+  projection,
+}: {
+  days: BudgetSeriesDay[];
+  maxTotal: number;
+  projection?: ChartProjection;
+}) {
+  const remaining = projection?.remainingDays ?? 0;
+  const projectionValue = projection?.avgPerDay ?? 0;
+  const totalPoints = days.length + remaining;
+  const x = (i: number): number =>
+    totalPoints <= 1 ? LINE_W / 2 : (i / (totalPoints - 1)) * LINE_W;
   const y = (total: number): number => LINE_H - 2 - (total / maxTotal) * (LINE_H - 4);
+  const projectedLabel = projection ? " termasuk proyeksi" : "";
 
   return (
-    <div className="relative py-2" data-testid="budget-period-chart" role="img" aria-label="Grafik garis total harian periode budget">
+    <div
+      className="relative py-2"
+      data-testid="budget-period-chart"
+      role="img"
+      aria-label={`Grafik garis total harian periode budget${projectedLabel}`}
+    >
       <svg
         viewBox={`0 0 ${LINE_W} ${LINE_H}`}
         preserveAspectRatio="none"
@@ -244,6 +467,20 @@ function FullLineChart({ days, maxTotal }: { days: BudgetSeriesDay[]; maxTotal: 
             />
           );
         })}
+        {projection && remaining > 0 && (
+          <line
+            data-testid="budget-chart-projection-line"
+            x1={x(days.length - 1)}
+            y1={y(projectionValue)}
+            x2={x(totalPoints - 1)}
+            y2={y(projectionValue)}
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+            strokeDasharray="4 2"
+            className="stroke-emerald-500/80"
+          />
+        )}
         {days.map((day, i) => (
           <circle key={day.date} cx={x(i)} cy={y(day.total)} r="0.8" data-testid={`budget-period-point-${day.date}`} className="fill-emerald-400">
             <title>{`${day.date}: ${formatIDR(day.total)}`}</title>
@@ -251,6 +488,7 @@ function FullLineChart({ days, maxTotal }: { days: BudgetSeriesDay[]; maxTotal: 
         ))}
       </svg>
       <ChartFooter first={days[0]?.date ?? ""} />
+      {projection && <ChartCaption projection={projection} />}
     </div>
   );
 }

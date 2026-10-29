@@ -197,8 +197,8 @@ describe("App — Budget Today fair toggle (independent from header)", () => {
       expect(screen.getByTestId("budget-today-delta")).toHaveTextContent("−Rp50.000");
     });
 
-    // Header amount is plain text while in budget view (D toggle hidden there)
-    expect(screen.getByTestId("header-total").tagName).toBe("SPAN");
+    // Header is hidden entirely in the budget view (single navbar)
+    expect(screen.queryByTestId("header-total")).not.toBeInTheDocument();
 
     // Persistence: budget-today-mode should be "fair"
     expect(localStorage.getItem("expense-app.budget-today-mode")).toBe("fair");

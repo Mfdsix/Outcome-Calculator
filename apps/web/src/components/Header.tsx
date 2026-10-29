@@ -66,6 +66,9 @@ export function Header({
             label="Memuat total"
             className="h-5 w-20"
           />
+          {/* Keeps `trailing` at the same child index as the loaded branch —
+              otherwise the swap remounts UserMenu and closes an open menu. */}
+          {null}
           {trailing}
         </div>
       </header>

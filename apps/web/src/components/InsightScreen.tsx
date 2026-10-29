@@ -1,4 +1,6 @@
-import type { Insight } from "@expense-app/shared";
+import type { BudgetForecast, BudgetType, Insight } from "@expense-app/shared";
+
+import { ForecastBar } from "./ForecastBar";
 
 const TONE_DOT: Record<Insight["tone"], string> = {
   ok: "bg-emerald-400",
@@ -17,6 +19,10 @@ export interface InsightScreenProps {
   onToggleTicker: () => void;
   onBack: () => void;
   onOpenBudget: () => void;
+  /** Active-budget projection (moved here from the Budget screen). */
+  forecast?: BudgetForecast | null;
+  /** Active budget type + amount, required to render the forecast section. */
+  activeBudget?: { type: BudgetType; amount: number } | null;
 }
 
 /**
@@ -25,11 +31,11 @@ export interface InsightScreenProps {
  * BudgetScreen (top bar + back). Without a budget the CTA jumps to the
  * budget screen so the user can set one up.
  */
-export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTicker, onBack, onOpenBudget }: InsightScreenProps) {
+export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTicker, onBack, onOpenBudget, forecast, activeBudget }: InsightScreenProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="insight-screen">
       {/* Top bar — back button + toggle, same row */}
-      <div className="flex items-center justify-between pb-2">
+      <div className="flex items-center justify-between pb-2 pt-4">
         <button
           type="button"
           aria-label="Kembali ke kalkulator"
@@ -83,6 +89,28 @@ export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTick
             </li>
           ))}
         </ul>
+
+        {/* Projection lives here now — the Budget screen keeps only actuals. */}
+        {forecast && forecast.available && activeBudget !== null && activeBudget !== undefined && (
+          <section
+            data-testid="insight-forecast"
+            aria-labelledby="insight-forecast-heading"
+            className="px-1 pt-1"
+          >
+            <h2
+              id="insight-forecast-heading"
+              className="pb-1.5 text-[10px] uppercase tracking-widest text-neutral-500"
+            >
+              Proyeksi
+            </h2>
+            <ForecastBar
+              type={activeBudget.type}
+              amount={activeBudget.amount}
+              forecast={forecast}
+              hideLabel
+            />
+          </section>
+        )}
 
         {!hasBudget && (
           <button
