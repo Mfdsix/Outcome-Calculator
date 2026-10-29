@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import type {
    BudgetActiveResponse,
+   BudgetForecast,
    BudgetHistoryItem,
    BudgetStatus,
    BudgetType,
@@ -24,7 +25,11 @@ import type { BudgetDashboardData } from "@expense-app/shared";
 import type { FairBreakdown } from "@expense-app/shared";
 
 import { BudgetModal } from "./BudgetModal";
+import { BudgetNavStrip } from "./BudgetNavStrip";
+import { BudgetPastCard } from "./BudgetPastCard";
 import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodChart";
+import type { ChartProjection } from "./BudgetPeriodChart";
+import { ForecastBar } from "./ForecastBar";
 import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { FairInfoButton } from "./FairBreakdown";
@@ -67,6 +72,22 @@ export interface BudgetScreenProps {
   dashboardData?: BudgetDashboardData | null;
   /** Pre-computed win streaks from AppBody (plan §5). */
   winStreaks?: WinStreakResult | null;
+
+  // --- History navigation + forecast (budget plan §3–§5) --------------------
+
+  /** Focused index in `[active, ...history]`. Defaults to 0 (active). */
+  focusedIndex?: number;
+  /** Move the focused index (nav strip, keyboard, Kelola jump-to). */
+  onFocusChange?: (index: number) => void;
+  /** Focused list from useBudget; falls back to `[active, ...history]`. */
+  budgetList?: Array<NonNullable<BudgetActiveResponse["budget"]> | BudgetHistoryItem>;
+  /** Past series cache, keyed by budget id. */
+  pastSeries?: Record<string, BudgetDayPoint[]>;
+  pastSeriesLoading?: string | null;
+  pastSeriesError?: string | null;
+  onRetryPastSeries?: () => void;
+  /** Active-budget projection (single source with the chart caption). */
+  forecast?: BudgetForecast | null;
 }
 
 interface PrefillState {
@@ -88,6 +109,10 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+function shortDate(date: string): string {
+  return formatDateShort(new Date(`${date}T12:00:00+07:00`), APP_TIMEZONE);
+}
+
 /**
  * Dedicated budget screen (plan §3): active card (or empty state), history
  * with "Pakai lagi", and the create form. "Pakai lagi" PREFILLS the form —
@@ -95,7 +120,7 @@ function civilToISO(parts: { year: number; month: number; day: number }): string
  * user to review before saving; saving is a plain create that auto-replaces
  * the active budget. Spent always starts from zero (live data).
  */
-export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel, budgetTodayFairInfoDayKey, dashboardData: dashboardDataProp, winStreaks: winStreaksProp }: BudgetScreenProps) {
+export function BudgetScreen({ active, history, loading, onBack, onCreate, onRemove, series, seriesLoading, budgetTodayMode, onToggleBudgetTodayMode, budgetTodaySpentFair, budgetTodayLoading, budgetTodayFairFallback, budgetTodayFairBreakdown, budgetTodayFairInfoLabel, budgetTodayFairInfoDayKey, dashboardData: dashboardDataProp, winStreaks: winStreaksProp, focusedIndex: focusedIndexProp, onFocusChange, budgetList, pastSeries: pastSeriesProp, pastSeriesLoading: pastSeriesLoadingProp, pastSeriesError: pastSeriesErrorProp, onRetryPastSeries, forecast }: BudgetScreenProps) {
   /** Today's civil date (YYYY-MM-DD) — single source of truth for pace math. */
   const todayISO = useMemo(() => civilToISO(civilToday(APP_TIMEZONE)), []);
   const nowISO = useMemo(() => new Date().toISOString(), []);
@@ -172,6 +197,73 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
   /** Finished: period fully past today → gray card + "Buat yang baru". */
   const finished = active !== null && active.endDate < todayISO;
 
+  // --- Navigation across [active, ...history] (budget plan §3) --------------
+  const navList = budgetList ?? (active !== null ? [active, ...history] : history);
+  const focusedIndex = Math.min(focusedIndexProp ?? 0, Math.max(0, navList.length - 1));
+  const focused = navList[focusedIndex] ?? null;
+  const focusedIsPast = focused !== null && (active === null || focused.id !== active.id);
+  const focusedPastItem =
+    focusedIsPast && focused !== null
+      ? (history.find((item) => item.id === focused.id) ?? null)
+      : null;
+
+  const navLabels = navList.map((item) => {
+    if (active !== null && item.id === active.id) {
+      if (active.endDate < todayISO) return `Selesai · ${formatIDR(active.amount)}`;
+      return item.type === "daily"
+        ? `Aktif · ${formatIDR(item.amount)}/hari`
+        : `Aktif · ${formatIDR(item.amount)}`;
+    }
+    return `${shortDate(item.startDate)} – ${shortDate(item.endDate)}`;
+  });
+
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+
+  /** Moving focus resets the day-history scroll area to the top. */
+  useEffect(() => {
+    const node = historyScrollRef.current;
+    if (!node) return;
+    if (typeof node.scrollTo === "function") node.scrollTo({ top: 0 });
+    else node.scrollTop = 0;
+  }, [focusedIndex]);
+
+  /** Desktop arrows = prev/next; inert while a modal/dialog is open. */
+  useEffect(() => {
+    if (onFocusChange === undefined) return;
+    const handler = (event: KeyboardEvent): void => {
+      if (modalMode !== null || confirmRemove) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")
+      ) {
+        return;
+      }
+      if (navList.length <= 1) return;
+      event.preventDefault();
+      onFocusChange(
+        event.key === "ArrowLeft"
+          ? Math.max(0, focusedIndex - 1)
+          : Math.min(navList.length - 1, focusedIndex + 1),
+      );
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onFocusChange, modalMode, confirmRemove, focusedIndex, navList.length]);
+
+  /** Single projection source shared by ForecastBar and the chart caption. */
+  const projection = useMemo<ChartProjection | undefined>(() => {
+    if (!forecast || !forecast.available || active === null) return undefined;
+    return {
+      avgPerDay: forecast.avgPerDay,
+      remainingDays: forecast.remainingDays,
+      endDate: active.endDate,
+      cap: active.amount,
+      projectedTotal: forecast.projectedTotal,
+    };
+  }, [forecast, active]);
+
   /** Dashboard data (zero-fill + deltas + pace) — derived from series.
    * Falls back to internal computation when not passed via props (plan §5). */
   const dashboard = useMemo<BudgetDashboardData | null>(() => {
@@ -216,11 +308,19 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
         </button>
       </div>
 
+      <BudgetNavStrip
+        count={navList.length}
+        activeIndex={focusedIndex}
+        labels={navLabels}
+        onSelect={(index) => onFocusChange?.(index)}
+        hidden={navList.length <= 1}
+      />
+
       <div className="shrink-0 space-y-4">
-        {/* Active card / empty state */}
+        {/* Focused card: active / past / empty */}
         {loading && active === null ? (
           <ShimmerCard testid="budget-card-loading" label="Memuat budget" className="h-40 w-full" />
-        ) : active === null ? (
+        ) : active === null && focusedPastItem === null ? (
           <div
             data-testid="budget-empty"
             className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/40 px-4 py-6 text-center"
@@ -230,7 +330,21 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               Pasang batas harian atau bulanan — peringatan lunak, tanpa blokir input.
             </p>
           </div>
-        ) : (
+        ) : focusedIsPast && focusedPastItem !== null ? (
+          <BudgetPastCard
+            budget={focusedPastItem}
+            series={pastSeriesProp?.[focusedPastItem.id] ?? null}
+            seriesLoading={pastSeriesLoadingProp === focusedPastItem.id}
+            seriesError={
+              pastSeriesErrorProp != null &&
+              (pastSeriesProp?.[focusedPastItem.id] ?? null) === null
+                ? pastSeriesErrorProp
+                : null
+            }
+            onUseAgain={() => useAgain(focusedPastItem.id, focusedPastItem)}
+            onRetry={() => onRetryPastSeries?.()}
+          />
+        ) : active !== null ? (
           <>
             {!finished && dashboard !== null && (
               <>
@@ -253,10 +367,16 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                     winTodayKey={todayISO}
                   />
 
+                  {/* Layer 2b: active-budget projection summary */}
+                  {forecast && (
+                    <ForecastBar type={active.type} amount={active.amount} forecast={forecast} />
+                  )}
+
                   {/* Layer 2: Period card */}
                 <BudgetPeriod
                   key={active.id}
                   dashboard={dashboard}
+                  projection={projection}
                   onEdit={() => useAgain("active", active)}
                   onHapus={() => setConfirmRemove(true)}
                   onKelola={() => setModalMode("kelola")}
@@ -287,18 +407,18 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                 </>
               )}
           </>
-        )}
+        ) : null}
  
       </div>
 
       {/* Day history fills the remaining height and scrolls internally. */}
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {/* Day History (plan §3: 14 default + expand). While the series is
-            still loading, show a quiet placeholder instead of nothing. */}
-        {!finished && dashboard !== null && dashboard.days.length > 0 && (
+      <div ref={historyScrollRef} className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {/* Day History (plan §3: 14 default + expand) — ACTIVE variant only;
+            a past budget already carries its own full chart. */}
+        {!finished && !focusedIsPast && dashboard !== null && dashboard.days.length > 0 && (
           <BudgetDayHistory days={dashboard.days} maxInitial={14} />
         )}
-        {!finished && dashboard === null && seriesLoading && active !== null && (
+        {!finished && !focusedIsPast && dashboard === null && seriesLoading && active !== null && (
           <ShimmerRows n={5} testid="budget-series-loading" label="Memuat riwayat harian" />
         )}
 
@@ -373,6 +493,15 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
               <BudgetKelolaModal
                 history={history}
                 onUseAgain={useAgain}
+                onJumpTo={
+                  onFocusChange === undefined
+                    ? undefined
+                    : (id) => {
+                        const index = navList.findIndex((item) => item.id === id);
+                        if (index >= 0) onFocusChange(index);
+                        closeModal();
+                      }
+                }
               />
             )}
           </BudgetModal>,
@@ -687,11 +816,13 @@ function BudgetToday({
  *  headline + elapsed/total day counter + chart toggle, bar/line chart. */
 function BudgetPeriod({
   dashboard,
+  projection,
   onEdit,
   onHapus,
   onKelola,
 }: {
   dashboard: BudgetDashboardData;
+  projection?: ChartProjection;
   onEdit: () => void;
   onHapus: () => void;
   onKelola: () => void;
@@ -753,7 +884,12 @@ function BudgetPeriod({
       </div>
 
       {/* Diverging bar/line chart — daily: cap−total per day; full: single-direction total */}
-      <BudgetPeriodChart days={dashboard.days} type={dashboard.type} forceMode={chartMode} />
+      <BudgetPeriodChart
+        days={dashboard.days}
+        type={dashboard.type}
+        forceMode={chartMode}
+        projection={projection}
+      />
       {/* Screen-reader progress (chart is role="img"; keep a real progressbar for AT). */}
       <div
         className="sr-only"
@@ -987,9 +1123,12 @@ function BudgetFormModal({
 function BudgetKelolaModal({
   history,
   onUseAgain,
+  onJumpTo,
 }: {
   history: BudgetHistoryItem[];
   onUseAgain: (source: string, item: { type: BudgetType; amount: number; startDate: string; endDate: string }) => void;
+  /** Jump the focused budget to history item `id` and close the modal. */
+  onJumpTo?: (id: string) => void;
 }) {
   return (
     <>
@@ -1021,6 +1160,17 @@ function BudgetKelolaModal({
                     <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${chip.className}`}>
                       {chip.label}
                     </span>
+                    {onJumpTo && (
+                      <button
+                        type="button"
+                        data-testid={`budget-history-view-${item.id}`}
+                        aria-label={`Lihat ${periodLabelOf(item.startDate, item.endDate, item.type)}`}
+                        onClick={() => onJumpTo(item.id)}
+                        className="rounded-lg border border-neutral-800 px-2 py-1.5 text-xs font-semibold text-neutral-300 active:bg-neutral-800"
+                      >
+                        [&gt;]
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-testid={`budget-use-again-${item.id}`}

@@ -248,6 +248,13 @@ export const budgetsApi = {
     return request<BudgetSeriesResponse>("/api/budgets/active/series");
   },
 
+  /** Day series for one budget (active or past), fetched on demand. */
+  seriesById(id: string, signal?: AbortSignal): Promise<BudgetSeriesResponse> {
+    return request<BudgetSeriesResponse>(`/api/budgets/${encodeURIComponent(id)}/series`, {
+      signal,
+    });
+  },
+
   history(limit = 20): Promise<{ history: BudgetHistoryItem[] }> {
     const query = new URLSearchParams({ limit: String(limit) });
     return request<{ history: BudgetHistoryItem[] }>(`/api/budgets/history?${query.toString()}`);

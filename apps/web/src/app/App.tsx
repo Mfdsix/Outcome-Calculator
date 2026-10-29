@@ -9,9 +9,16 @@ import {
   zonedWallTimeToUtc,
   buildBudgetSnapshot,
   buildDashboardData,
+  budgetForecast,
   computeWinStreaks,
 } from "@expense-app/shared";
-import type { AllocationType, ExpenseDto, WinStreakResult, BudgetDashboardData } from "@expense-app/shared";
+import type {
+  AllocationType,
+  ExpenseDto,
+  WinStreakResult,
+  BudgetDashboardData,
+  BudgetForecast,
+} from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
 import { GraphSection } from "../components/GraphSection";
@@ -1134,6 +1141,21 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     );
   }, [budget.active, budget.series, nowISO]);
 
+  /** Active-budget projection (single source for ForecastBar + chart caption). */
+  const activeForecast = useMemo<BudgetForecast | null>(() => {
+    if (budget.active === null || dashboardData === null) return null;
+    return budgetForecast({
+      type: budget.active.type,
+      amount: budget.active.amount,
+      startDate: budget.active.startDate,
+      endDate: budget.active.endDate,
+      days: dashboardData.days,
+      todaySpent: budget.active.todaySpent,
+      now: new Date(nowISO),
+      timeZone: APP_TIMEZONE,
+    });
+  }, [budget.active, dashboardData, nowISO]);
+
   /**
    * Win streaks derived from the dashboard days. Only computed for daily
    * budgets — computeWinStreaks checks the series type via the daily deltas
@@ -1851,6 +1873,14 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
            onRemove={handleBudgetRemove}
            series={budget.series}
            seriesLoading={budget.seriesLoading}
+           focusedIndex={budget.focusedIndex}
+           onFocusChange={budget.setFocusedIndex}
+           budgetList={budget.list}
+           pastSeries={budget.pastSeries}
+           pastSeriesLoading={budget.pastSeriesLoading}
+           pastSeriesError={budget.pastSeriesError}
+           onRetryPastSeries={budget.retryPastSeries}
+           forecast={activeForecast}
            budgetTodayMode={budgetTodayMode}
            onToggleBudgetTodayMode={toggleBudgetTodayMode}
             budgetTodaySpentFair={budgetFairTotal}

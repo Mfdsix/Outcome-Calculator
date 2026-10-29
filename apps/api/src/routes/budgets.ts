@@ -46,6 +46,31 @@ export const budgetRoutes: FastifyPluginAsync<BudgetRoutesOptions> = async (
     return aggregate._sum.amount === null ? 0 : Number(aggregate._sum.amount);
   }
 
+  /**
+   * Group expenses by Jakarta civil day inside a budget range. Returns only
+   * days that have spending (sparse; the client zero-fills).
+   */
+  async function seriesForBudget(
+    userId: string,
+    budget: Budget,
+    timeZone: string,
+  ): Promise<BudgetDayPoint[]> {
+    const bounds = rangeBounds(budget, timeZone);
+    const rows = await prisma.$queryRaw<Array<{ date: string; total: string }>>`
+      SELECT
+        to_char("occurred_at" AT TIME ZONE ${timeZone as string}, 'YYYY-MM-DD') AS date,
+        SUM("amount") AS total
+      FROM "expenses"
+      WHERE "user_id" = ${userId}::uuid
+        AND "occurred_at" >= ${bounds.from}::timestamptz
+        AND "occurred_at" < ${bounds.to}::timestamptz
+      GROUP BY 1
+      ORDER BY 1
+    `;
+
+    return rows.map((row) => ({ date: row.date, total: Number(row.total) }));
+  }
+
   app.post("/api/budgets", async (request, reply) => {
     const userId = request.userId as string;
     const parsed = createBudgetSchema.safeParse(request.body);
@@ -156,40 +181,41 @@ export const budgetRoutes: FastifyPluginAsync<BudgetRoutesOptions> = async (
     return reply.send({ history });
   });
 
-   app.get("/api/budgets/active/series", async (request, reply) => {
-     const userId = request.userId as string;
-     const budget = await prisma.budget.findFirst({
-       where: { userId, isActive: true },
-       orderBy: { createdAt: "desc" },
-     });
+  app.get("/api/budgets/active/series", async (request, reply) => {
+    const userId = request.userId as string;
+    const budget = await prisma.budget.findFirst({
+      where: { userId, isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
 
-     if (!budget) {
-       return reply.send({ days: [] } satisfies BudgetSeriesResponse);
-     }
+    if (!budget) {
+      return reply.send({ days: [] } satisfies BudgetSeriesResponse);
+    }
 
-     // Group expenses by civil day (Asia/Jakarta) inside the budget range.
-     // Server returns only days that have spending; the client zero-fills.
-     const bounds = rangeBounds(budget, appTimezone);
-     const rows = await prisma.$queryRaw<
-       Array<{ date: string; total: string }>
-     >`
-       SELECT
-         to_char("occurred_at" AT TIME ZONE ${appTimezone as string}, 'YYYY-MM-DD') AS date,
-         SUM("amount") AS total
-       FROM "expenses"
-       WHERE "user_id" = ${userId}::uuid
-         AND "occurred_at" >= ${bounds.from}::timestamptz
-         AND "occurred_at" < ${bounds.to}::timestamptz
-       GROUP BY 1
-       ORDER BY 1
-     `;
+    const days = await seriesForBudget(userId, budget, appTimezone);
+    return reply.send({ days } satisfies BudgetSeriesResponse);
+  });
 
-     const days: BudgetDayPoint[] = rows.map((row) => ({
-       date: row.date,
-       total: Number(row.total),
-     }));
-     return reply.send({ days } satisfies BudgetSeriesResponse);
-   });
+  /**
+   * Day series for a single budget (active or inactive). Foreign ids and
+   * unknown ids both answer 404 — existence across users is not disclosed.
+   */
+  app.get("/api/budgets/:id/series", async (request, reply) => {
+    const userId = request.userId as string;
+    const { id } = request.params as { id: string };
+
+    if (!UUID_RE.test(id)) {
+      return reply.status(404).send({ error: "Not found." });
+    }
+
+    const budget = await prisma.budget.findFirst({ where: { id, userId } });
+    if (!budget) {
+      return reply.status(404).send({ error: "Not found." });
+    }
+
+    const days = await seriesForBudget(userId, budget, appTimezone);
+    return reply.send({ days } satisfies BudgetSeriesResponse);
+  });
 
    app.delete("/api/budgets/active", async (request, reply) => {
     const userId = request.userId as string;
@@ -208,6 +234,9 @@ export const budgetRoutes: FastifyPluginAsync<BudgetRoutesOptions> = async (
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Prisma uuid id filter guard — malformed ids answer 404, not 500. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Inclusive @db.Date columns are UTC midnights — read straight back. */
 function civilDateString(date: Date): string {
