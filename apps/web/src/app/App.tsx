@@ -1775,6 +1775,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
   return (
     <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
+       {/* Budget / Insight own their top bar (back + title) — the global header
+           would be a second navbar there. Same hide rule as PeriodSelector. */}
+       {!isBudget && !isInsight && (
        <Header
           periodLabel={effectivePeriodLabel}
           totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
@@ -1812,6 +1815,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             />
           }
        />
+       )}
 
       <UpdateBanner />
 

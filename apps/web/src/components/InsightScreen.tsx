@@ -29,7 +29,7 @@ export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTick
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="insight-screen">
       {/* Top bar — back button + toggle, same row */}
-      <div className="flex items-center justify-between pb-2">
+      <div className="flex items-center justify-between pb-2 pt-4">
         <button
           type="button"
           aria-label="Kembali ke kalkulator"
