@@ -1141,7 +1141,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     );
   }, [budget.active, budget.series, nowISO]);
 
-  /** Active-budget projection (single source for ForecastBar + chart caption). */
+  /** Active-budget projection (shared by the Insight Proyeksi section and
+   *  the chart caption on the Budget screen). */
   const activeForecast = useMemo<BudgetForecast | null>(() => {
     if (budget.active === null || dashboardData === null) return null;
     return budgetForecast({
@@ -1903,6 +1904,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           onToggleTicker={toggleTicker}
           onBack={closeInsight}
           onOpenBudget={openBudget}
+          forecast={activeForecast}
+          activeBudget={
+            budget.active !== null
+              ? { type: budget.active.type, amount: budget.active.amount }
+              : null
+          }
         />
       ) : isSpecial ? (
         <>

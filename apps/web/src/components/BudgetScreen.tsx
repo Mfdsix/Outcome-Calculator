@@ -29,7 +29,6 @@ import { BudgetNavStrip } from "./BudgetNavStrip";
 import { BudgetPastCard } from "./BudgetPastCard";
 import { BudgetPeriodChart, PERIOD_CHART_LINE_MIN_DAYS } from "./BudgetPeriodChart";
 import type { ChartProjection } from "./BudgetPeriodChart";
-import { ForecastBar } from "./ForecastBar";
 import { periodLabelOf } from "./BudgetProgress";
 import { ChartModeToggle } from "./ChartModeToggle";
 import { FairInfoButton } from "./FairBreakdown";
@@ -252,7 +251,8 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
     return () => window.removeEventListener("keydown", handler);
   }, [onFocusChange, modalMode, confirmRemove, focusedIndex, navList.length]);
 
-  /** Single projection source shared by ForecastBar and the chart caption. */
+  /** Projection source for the chart caption + ghost bars (the Proyeksi
+   *  card itself lives on the Insight screen). */
   const projection = useMemo<ChartProjection | undefined>(() => {
     if (!forecast || !forecast.available || active === null) return undefined;
     return {
@@ -367,10 +367,8 @@ export function BudgetScreen({ active, history, loading, onBack, onCreate, onRem
                     winTodayKey={todayISO}
                   />
 
-                  {/* Layer 2b: active-budget projection summary */}
-                  {forecast && (
-                    <ForecastBar type={active.type} amount={active.amount} forecast={forecast} />
-                  )}
+                  {/* Projection moved to the Insight screen (section below
+                      the list) — the Budget screen shows actuals only. */}
 
                   {/* Layer 2: Period card */}
                 <BudgetPeriod

@@ -5,6 +5,9 @@ export interface ForecastBarProps {
   type: BudgetType;
   amount: number;
   forecast: BudgetForecast;
+  /** Hide the internal "Proyeksi" caption (used when an outer section
+   * already provides the heading). */
+  hideLabel?: boolean;
 }
 
 /**
@@ -17,8 +20,12 @@ export interface ForecastBarProps {
  *
  * Hidden entirely before the first elapsed day (`available: false`).
  */
-export function ForecastBar({ type, amount, forecast }: ForecastBarProps) {
+export function ForecastBar({ type, amount, forecast, hideLabel = false }: ForecastBarProps) {
   if (!forecast.available) return null;
+
+  const label = hideLabel ? null : (
+    <p className="text-[10px] uppercase tracking-widest text-neutral-500">Proyeksi</p>
+  );
 
   if (type === "full") {
     const delta = forecast.projectedDelta ?? 0;
@@ -28,8 +35,8 @@ export function ForecastBar({ type, amount, forecast }: ForecastBarProps) {
         data-testid="budget-forecast"
         className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-3"
       >
-        <p className="text-[10px] uppercase tracking-widest text-neutral-500">Proyeksi</p>
-        <p className="mt-0.5 flex items-baseline gap-2">
+        {label}
+        <p className={`${hideLabel ? "" : "mt-0.5 "}flex items-baseline gap-2`}>
           <span
             data-testid="budget-forecast-total"
             className={`text-lg font-semibold tabular-nums ${over ? "text-red-300" : "text-emerald-300"}`}
@@ -61,8 +68,8 @@ export function ForecastBar({ type, amount, forecast }: ForecastBarProps) {
       data-testid="budget-forecast"
       className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-3"
     >
-      <p className="text-[10px] uppercase tracking-widest text-neutral-500">Proyeksi</p>
-      <p data-testid="budget-forecast-avg" className="mt-0.5 text-lg font-semibold tabular-nums text-neutral-100">
+      {label}
+      <p data-testid="budget-forecast-avg" className={`${hideLabel ? "" : "mt-0.5 "}text-lg font-semibold tabular-nums text-neutral-100`}>
         Rata-rata {formatIDR(forecast.avgPerDay)}
         <span className="text-xs font-normal text-neutral-500">/hari</span>
       </p>

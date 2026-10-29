@@ -76,8 +76,9 @@ Lock (PIN) → Calculator home (Today) → Browse history (D/W/M) → Budget / I
 - `BarChart` — pure CSS bars, no chart lib. Click bar = select.
 - `SummaryList` (aggregates) / `BrowseList` (transactions in a day) — ledger with auto-scroll.
 - `BudgetScreen` — focused budget card (active / past / empty) + nav strip + history with "reuse" prefill + create form (daily/full) + delete.
-- `BudgetNavStrip` / `BudgetPastCard` / `ForecastBar` — prev/next across `[active, ...history]`, full past-budget card, and the active projection summary.
-- `InsightScreen` / `InsightTicker` — derived tips list + rotating 1-line marquee on home.
+- `BudgetNavStrip` / `BudgetPastCard` — prev/next across `[active, ...history]` and the full past-budget card.
+- `ForecastBar` — active projection card (lives in the **Insight** screen, below the list as a "Proyeksi" section; the Budget screen shows actuals only).
+- `InsightScreen` / `InsightTicker` — derived tips list + Proyeksi section + rotating 1-line marquee on home.
 - `UserMenu` — masked PIN, Budget (status dot), Insight, Theme, Delete account (retype PIN), Logout.
 - Hooks: `useCalculator` (digit machine), `useExpenses` (modes + data + cache), `useBudget` (active + history), `useInsights` (pure memo, no fetch), `useOnline` (navigator + probe), `useSync` (drain trigger).
 
@@ -127,7 +128,7 @@ DELETE /api/budgets/active → 204 | 404
 - **List model:** `[active, ...history]` (active always index 0); `focusedIndex` lives in `useBudget` and only moves the UI — no server mutation. Past series are fetched on demand per id (`seriesById`) and cached in `pastSeries`; `refresh()` (any expense/budget change) invalidates that cache.
 - **Forecast (`packages/shared/src/budgetForecast.ts`):** pure, derived, never persisted. `budgetForecast` uses the active series (already zero-filled and clamped to today): `avgPerDay = spent / elapsedDays`; FULL projects `spent + avgPerDay × remainingDays` and exposes `allowedPerDay` (hidden when `remainingDays = 0`); DAILY has no nominal projection — only the average pace, today's remaining cap and `overDays` (caps reset daily).
 - **Historical (`historicalForecast`):** compares the first-half pace × total days against reality for a finished FULL budget (`tone: better | worse | close`, close = |surprise| < 10% of amount). DAILY past budgets show a "N dari M hari under cap" summary instead.
-- **Chart convention:** solid = actual, dashed/ghost = projection (`BudgetPeriodChart` `projection` prop). The full-range chart has no cap line; the cap/delta lives in the caption + `ForecastBar`.
+- **Chart convention:** solid = actual, dashed/ghost = projection (`BudgetPeriodChart` `projection` prop). The full-range chart has no cap line; the cap/delta lives in the caption + the Insight `ForecastBar` section.
 - DTO: `BigInt → number`, timestamps via `toIsoWithOffset(row, APP_TIMEZONE)`.
 
 ### 4.4 Client storage

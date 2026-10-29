@@ -90,13 +90,14 @@ function Harness() {
 }
 
 describe("BudgetScreen — history navigation + forecast", () => {
-  it("shows the strip, the active card and the forecast bar by default", () => {
+  it("shows the strip and the active card, without the projection card", () => {
     render(<Harness />);
 
     expect(screen.getByTestId("budget-nav")).toBeInTheDocument();
     expect(screen.getByTestId("budget-nav-label")).toHaveTextContent("Aktif · Rp3.000.000");
     expect(screen.getByTestId("budget-today")).toBeInTheDocument();
-    expect(screen.getByTestId("budget-forecast")).toBeInTheDocument();
+    // Projection moved to the Insight screen — Budget shows actuals only.
+    expect(screen.queryByTestId("budget-forecast")).not.toBeInTheDocument();
     expect(screen.queryByTestId("budget-past-card")).not.toBeInTheDocument();
   });
 
