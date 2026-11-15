@@ -1,6 +1,7 @@
-import type { BudgetForecast, BudgetType, Insight } from "@expense-app/shared";
+import type { BudgetForecast, BudgetType, Insight, RecoveryPlan } from "@expense-app/shared";
 
 import { ForecastBar } from "./ForecastBar";
+import { InsightRecoveryCard } from "./InsightRecoveryCard";
 
 const TONE_DOT: Record<Insight["tone"], string> = {
   ok: "bg-emerald-400",
@@ -23,6 +24,8 @@ export interface InsightScreenProps {
   forecast?: BudgetForecast | null;
   /** Active budget type + amount, required to render the forecast section. */
   activeBudget?: { type: BudgetType; amount: number } | null;
+  /** Daily recovery plan (budget (−) today) — null/hidden when not over. */
+  recovery?: RecoveryPlan | null;
 }
 
 /**
@@ -31,7 +34,7 @@ export interface InsightScreenProps {
  * BudgetScreen (top bar + back). Without a budget the CTA jumps to the
  * budget screen so the user can set one up.
  */
-export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTicker, onBack, onOpenBudget, forecast, activeBudget }: InsightScreenProps) {
+export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTicker, onBack, onOpenBudget, forecast, activeBudget, recovery }: InsightScreenProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="insight-screen">
       {/* Top bar — back button + toggle, same row */}
@@ -89,6 +92,10 @@ export function InsightScreen({ insights, hasBudget, tickerVisible, onToggleTick
             </li>
           ))}
         </ul>
+
+        {/* Budget (−) today: recovery planner (daily caps reset, so today's
+            overrun needs an explicit plan to get back to break-even). */}
+        {recovery !== null && recovery !== undefined && <InsightRecoveryCard plan={recovery} />}
 
         {/* Projection lives here now — the Budget screen keeps only actuals. */}
         {forecast && forecast.available && activeBudget !== null && activeBudget !== undefined && (
