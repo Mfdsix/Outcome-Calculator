@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUDGET_MAX_DAYS,
   addCivilMonthsClamped,
+  budgetCapTotal,
   budgetProgressPct,
   budgetStatus,
   civilDateSchema,
@@ -134,6 +135,50 @@ describe("budgetProgressPct", () => {
     expect(budgetProgressPct(0, 100_000)).toBe(0);
     expect(budgetProgressPct(150_000, 100_000)).toBe(150);
     expect(budgetProgressPct(0, 0)).toBe(0);
+  });
+});
+
+describe("budgetCapTotal", () => {
+  it("full budgets cap the whole range", () => {
+    expect(
+      budgetCapTotal({
+        type: "full",
+        amount: 1_000_000,
+        startDate: "2026-07-01",
+        endDate: "2026-07-31",
+      }),
+    ).toBe(1_000_000);
+  });
+
+  it("daily budgets multiply the per-day cap by the inclusive day count", () => {
+    expect(
+      budgetCapTotal({
+        type: "daily",
+        amount: 70_000,
+        startDate: "2026-07-01",
+        endDate: "2026-07-31",
+      }),
+    ).toBe(2_170_000); // 31 days
+
+    expect(
+      budgetCapTotal({
+        type: "daily",
+        amount: 50_000,
+        startDate: "2026-08-01",
+        endDate: "2026-08-01",
+      }),
+    ).toBe(50_000); // single day
+  });
+
+  it("handles a leap February", () => {
+    expect(
+      budgetCapTotal({
+        type: "daily",
+        amount: 10_000,
+        startDate: "2024-02-01",
+        endDate: "2024-02-29",
+      }),
+    ).toBe(290_000);
   });
 });
 

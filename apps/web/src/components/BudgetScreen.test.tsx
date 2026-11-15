@@ -31,6 +31,7 @@ const PAST: BudgetHistoryItem = {
   startDate: "2026-08-01",
   endDate: "2026-08-10",
   spent: 350_000,
+  capTotal: 1_000_000,
   status: "ok",
   createdAt: "2026-08-11T00:00:00.000Z",
 };
@@ -48,6 +49,23 @@ const PAST_SERIES = [
   { date: "2026-08-10", total: 20_000 },
 ];
 
+const PAST_DAILY: BudgetHistoryItem = {
+  id: "past-daily",
+  type: "daily",
+  amount: 100_000,
+  startDate: "2026-08-01",
+  endDate: "2026-08-02",
+  spent: 160_000,
+  capTotal: 200_000,
+  status: "ok",
+  createdAt: "2026-08-03T00:00:00.000Z",
+};
+
+const PAST_DAILY_SERIES = [
+  { date: "2026-08-01", total: 40_000 },
+  { date: "2026-08-02", total: 120_000 },
+];
+
 const FORECAST: BudgetForecast = {
   available: true,
   avgPerDay: 90_000,
@@ -60,12 +78,20 @@ const FORECAST: BudgetForecast = {
   totalDays: 30,
 };
 
-function Harness() {
-  const [focusedIndex, setFocusedIndex] = useState(0);
+function Harness({
+  history = [PAST],
+  pastSeries = { "past-1": PAST_SERIES },
+  initialFocus = 0,
+}: {
+  history?: BudgetHistoryItem[];
+  pastSeries?: Record<string, { date: string; total: number }[]>;
+  initialFocus?: number;
+} = {}) {
+  const [focusedIndex, setFocusedIndex] = useState(initialFocus);
   return (
     <BudgetScreen
       active={ACTIVE}
-      history={[PAST]}
+      history={history}
       loading={false}
       onBack={vi.fn()}
       onCreate={vi.fn(async () => true)}
@@ -79,8 +105,8 @@ function Harness() {
       budgetTodayFairFallback={false}
       focusedIndex={focusedIndex}
       onFocusChange={setFocusedIndex}
-      budgetList={[ACTIVE, PAST]}
-      pastSeries={{ "past-1": PAST_SERIES }}
+      budgetList={[ACTIVE, ...history]}
+      pastSeries={pastSeries}
       pastSeriesLoading={null}
       pastSeriesError={null}
       onRetryPastSeries={vi.fn()}
@@ -138,6 +164,46 @@ describe("BudgetScreen — history navigation + forecast", () => {
 
     expect(screen.getByTestId("budget-past-card")).toBeInTheDocument();
     expect(screen.queryByTestId("budget-history-item-past-1")).not.toBeInTheDocument();
+  });
+
+  it("shows the same +/- day history for a focused past budget", () => {
+    render(
+      <Harness
+        history={[PAST_DAILY]}
+        pastSeries={{ "past-daily": PAST_DAILY_SERIES }}
+        initialFocus={1}
+      />,
+    );
+
+    expect(screen.getByTestId("budget-past-card")).toBeInTheDocument();
+    expect(screen.getByTestId("budget-day-history")).toBeInTheDocument();
+
+    // Newest first, same as the active budget.
+    expect(screen.getAllByTestId(/^budget-day-row-/).map((row) => row.getAttribute("data-testid"))).toEqual([
+      "budget-day-row-2026-08-02",
+      "budget-day-row-2026-08-01",
+    ]);
+    expect(screen.getByTestId("budget-day-delta-2026-08-01")).toHaveTextContent("+Rp60.000");
+    expect(screen.getByTestId("budget-day-delta-2026-08-02")).toHaveTextContent("−Rp20.000");
+  });
+
+  it("swaps the day history back to the active budget when navigating home", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        history={[PAST_DAILY]}
+        pastSeries={{ "past-daily": PAST_DAILY_SERIES }}
+        initialFocus={1}
+      />,
+    );
+
+    expect(screen.getByTestId("budget-day-row-2026-08-02")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("budget-nav-prev"));
+
+    // Active budget here has an empty (future) series → no day rows at all.
+    expect(screen.queryByTestId("budget-day-row-2026-08-02")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("budget-day-history")).not.toBeInTheDocument();
   });
 
   it("'Pakai lagi' on a past card opens the prefilled form without moving focus", async () => {

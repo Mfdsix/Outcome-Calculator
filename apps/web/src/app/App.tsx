@@ -11,6 +11,7 @@ import {
   buildDashboardData,
   budgetForecast,
   computeWinStreaks,
+  recoveryPlan,
 } from "@expense-app/shared";
 import type {
   AllocationType,
@@ -18,6 +19,7 @@ import type {
   WinStreakResult,
   BudgetDashboardData,
   BudgetForecast,
+  RecoveryPlan,
 } from "@expense-app/shared";
 
 import { AmountDisplay } from "../components/AmountDisplay";
@@ -1158,6 +1160,25 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   }, [budget.active, dashboardData, nowISO]);
 
   /**
+   * Daily recovery planner (Insight menu): fires when the budget is in the red
+   * CUMULATIVELY — `spent` across the whole running range vs
+   * `cap × elapsedDays` (the same period position the Budget screen shows).
+   * Requires the day series, so it stays hidden until that has loaded.
+   */
+  const recovery = useMemo<RecoveryPlan | null>(() => {
+    if (budget.active === null || dashboardData === null) return null;
+    const plan = recoveryPlan({
+      type: budget.active.type,
+      amount: budget.active.amount,
+      startDate: budget.active.startDate,
+      endDate: budget.active.endDate,
+      todayKey,
+      spentToDate: dashboardData.periodPosition.spent,
+    });
+    return plan.available ? plan : null;
+  }, [budget.active, dashboardData, todayKey]);
+
+  /**
    * Win streaks derived from the dashboard days. Only computed for daily
    * budgets — computeWinStreaks checks the series type via the daily deltas
    * that buildDashboardData already produces.
@@ -1905,6 +1926,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           onBack={closeInsight}
           onOpenBudget={openBudget}
           forecast={activeForecast}
+          recovery={recovery}
           activeBudget={
             budget.active !== null
               ? { type: budget.active.type, amount: budget.active.amount }

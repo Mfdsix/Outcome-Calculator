@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { budgetForecast, historicalForecast } from "./budgetForecast";
+import { budgetForecast, dailySpendStats, historicalForecast } from "./budgetForecast";
 import type { BudgetSeriesDay } from "./budgetDashboard";
 
 const TZ = "Asia/Jakarta";
@@ -180,5 +180,84 @@ describe("historicalForecast", () => {
     });
 
     expect(result.available).toBe(false);
+  });
+});
+
+describe("dailySpendStats", () => {
+  it("computes the calendar average, over/under/zero day counts", () => {
+    const stats = dailySpendStats({
+      days: series("2026-08-01", [40_000, 200_000, 0, 70_000]),
+      amount: 100_000,
+      type: "daily",
+    });
+
+    expect(stats.totalDays).toBe(4);
+    expect(stats.spent).toBe(310_000);
+    expect(stats.avgPerDay).toBe(77_500); // 310_000 / 4
+    expect(stats.overDays).toBe(1);
+    expect(stats.underDays).toBe(2); // at/under cap, zero days excluded
+    expect(stats.zeroDays).toBe(1);
+  });
+
+  it("picks the most extreme days, skipping no-spend days", () => {
+    const stats = dailySpendStats({
+      days: series("2026-08-01", [0, 45_000, 175_000, 90_000]),
+      amount: 100_000,
+      type: "daily",
+    });
+
+    // 1 Aug (no spending, delta = +100_000) must NOT win "paling hemat".
+    expect(stats.bestDay).toEqual({ date: "2026-08-02", total: 45_000, delta: 55_000 });
+    expect(stats.worstDay).toEqual({ date: "2026-08-03", total: 175_000, delta: -75_000 });
+  });
+
+  it("keeps the earliest day on ties (deterministic)", () => {
+    const stats = dailySpendStats({
+      days: series("2026-08-01", [50_000, 50_000, 150_000, 150_000]),
+      amount: 100_000,
+      type: "daily",
+    });
+
+    expect(stats.bestDay?.date).toBe("2026-08-01");
+    expect(stats.worstDay?.date).toBe("2026-08-03");
+  });
+
+  it("omits an extreme side that never happened", () => {
+    const allUnder = dailySpendStats({
+      days: series("2026-08-01", [40_000, 50_000]),
+      amount: 100_000,
+      type: "daily",
+    });
+    expect(allUnder.worstDay).toBeNull();
+    expect(allUnder.bestDay?.date).toBe("2026-08-01"); // +Rp60.000, the biggest saving
+
+    const allOver = dailySpendStats({
+      days: series("2026-08-01", [140_000, 150_000]),
+      amount: 100_000,
+      type: "daily",
+    });
+    expect(allOver.bestDay).toBeNull();
+    expect(allOver.worstDay?.date).toBe("2026-08-02");
+  });
+
+  it("returns averages only for full budgets", () => {
+    const stats = dailySpendStats({
+      days: series("2026-08-01", [0, 300_000]),
+      amount: 1_000_000,
+      type: "full",
+    });
+
+    expect(stats.avgPerDay).toBe(150_000);
+    expect(stats.zeroDays).toBe(1);
+    expect(stats.overDays).toBeNull();
+    expect(stats.underDays).toBeNull();
+    expect(stats.bestDay).toBeNull();
+    expect(stats.worstDay).toBeNull();
+  });
+
+  it("never divides by zero on an empty series", () => {
+    const stats = dailySpendStats({ days: [], amount: 70_000, type: "daily" });
+    expect(stats).toMatchObject({ totalDays: 0, spent: 0, avgPerDay: 0, zeroDays: 0 });
+    expect(stats.bestDay).toBeNull();
   });
 });

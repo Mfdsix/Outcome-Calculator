@@ -146,15 +146,19 @@ async function main(): Promise<void> {
   // Spent is NOT stored — computed live from expenses inside each range.
   // Three rows, all owned by the same SEED_PIN user:
   //   H1: history (old)  — daily 75k, range [60 → 31] days ago, inactive
+  //   H3: history       — daily 250k, range [17 → 9] days ago, inactive
+  //                       (deliberately generous → exercises the "Aman" path)
   //   H2: history (new)  — daily 80k, range [30 → 18] days ago, inactive
   //   A:  active          — daily 85k (or SEED_BUDGET_DAILY), [8 days ago → +30 days], active
-  // createdAt is set explicitly so H1 < H2 < A for deterministic history ordering.
+  // createdAt is set explicitly so H1 < H3 < H2 < A for deterministic history ordering.
   const dailyBudget = Number(process.env.SEED_BUDGET_DAILY ?? "85000");
 
   const h1Start = addCivilDays(today, -60);
   const h1End = addCivilDays(today, -31);
   const h2Start = addCivilDays(today, -30);
   const h2End = addCivilDays(today, -18);
+  const h3Start = addCivilDays(today, -17);
+  const h3End = addCivilDays(today, -9);
   const aStart = addCivilDays(today, -8);
   const aEnd = addCivilDays(today, 30);
 
@@ -166,6 +170,14 @@ async function main(): Promise<void> {
       endDate: civilDateToUtcMidnight(h1End),
       isActive: false,
       createdAt: new Date(Date.UTC(2025, 0, 1, 0, 0, 0)), // earliest
+    },
+    {
+      type: "daily" as const,
+      amount: BigInt(250_000),
+      startDate: civilDateToUtcMidnight(h3Start),
+      endDate: civilDateToUtcMidnight(h3End),
+      isActive: false,
+      createdAt: new Date(Date.UTC(2025, 0, 15, 0, 0, 0)),
     },
     {
       type: "daily" as const,
