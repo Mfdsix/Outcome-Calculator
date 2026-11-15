@@ -252,6 +252,47 @@ describe("GET /api/budgets/history", () => {
     expect(second.status).toBe("over"); // 8.2jt spent vs 1jt cap
   });
 
+  it("daily history compares the range TOTAL against amount × days", async () => {
+    // Rp70.000/hari × 31 hari = Rp2.170.000 cap for the whole period.
+    await createBudget({ type: "daily", amount: 70_000, startDate: "2026-07-01", endDate: "2026-07-31" });
+    await createBudget({ type: "full", amount: 1_000_000, startDate: "2026-08-01", endDate: "2026-08-31" });
+    // 2.5jt across 5 days: way over the daily cap, but over the range cap too.
+    await seedRows(
+      userId,
+      Array.from({ length: 5 }, (_, index) => ({
+        amount: 500_000,
+        occurredAt: new Date(`2026-07-0${index + 1}T10:00:00${TZ_OFFSET}`),
+      })),
+    );
+
+    const response = await app.inject({ method: "GET", url: "/api/budgets/history", headers: authed });
+    expect(response.statusCode).toBe(200);
+    const { history } = response.json();
+    const daily = history.find((item: { type: string }) => item.type === "daily");
+
+    expect(daily.amount).toBe(70_000); // per-day cap stays untouched
+    expect(daily.spent).toBe(2_500_000);
+    expect(daily.capTotal).toBe(2_170_000);
+    expect(daily.status).toBe("over"); // 2.5jt > 2.17jt, not "2.5jt > 70rb"
+  });
+
+  it("daily history stays under the cap when only the per-day figure was exceeded", async () => {
+    await createBudget({ type: "daily", amount: 100_000, startDate: "2026-07-01", endDate: "2026-07-31" });
+    await createBudget({ type: "full", amount: 1_000_000, startDate: "2026-08-01", endDate: "2026-08-31" });
+    // One blow-out day (Rp500.000) but Rp500.000 < 100.000 × 31 = Rp3.100.000.
+    await seedRows(userId, [
+      { amount: 500_000, occurredAt: new Date(`2026-07-10T10:00:00${TZ_OFFSET}`) },
+    ]);
+
+    const { history } = (
+      await app.inject({ method: "GET", url: "/api/budgets/history", headers: authed })
+    ).json();
+    const daily = history.find((item: { type: string }) => item.type === "daily");
+
+    expect(daily.capTotal).toBe(3_100_000);
+    expect(daily.status).toBe("ok"); // used to be wrongly "over"
+  });
+
   it("exposes deactivated budgets after DELETE (nothing is ever removed)", async () => {
     await createBudget({ type: "daily", amount: 50_000, startDate: "2026-09-01", endDate: "2026-09-30" });
     const deleted = await app.inject({ method: "DELETE", url: "/api/budgets/active", headers: authed });

@@ -46,6 +46,7 @@ function historyItem(id: string, overrides: Partial<BudgetHistoryItem> = {}): Bu
     startDate: "2026-08-01",
     endDate: "2026-08-31",
     spent: 900_000,
+    capTotal: 1_000_000,
     status: "ok",
     createdAt: "2026-08-31T00:00:00.000Z",
     ...overrides,

@@ -115,7 +115,7 @@ DELETE /api/expenses/:id → 204 | 404
 
 POST /api/budgets {type, amount, startDate, endDate} → 201 {id}
 GET  /api/budgets/active → {budget:null | {..., spent, todaySpent, remaining, status, progressPct}}
-GET  /api/budgets/history?limit= → past budgets with live spent
+GET  /api/budgets/history?limit= → past budgets with live spent + capTotal (whole-range cap)
 GET  /api/budgets/active/series → {days:[{date,total}]} sparse (active, [] if none)
 GET  /api/budgets/:id/series → {days} for one owned budget (active or past) | 404
 DELETE /api/budgets/active → 204 | 404
@@ -128,6 +128,9 @@ DELETE /api/budgets/active → 204 | 404
 - **List model:** `[active, ...history]` (active always index 0); `focusedIndex` lives in `useBudget` and only moves the UI — no server mutation. Past series are fetched on demand per id (`seriesById`) and cached in `pastSeries`; `refresh()` (any expense/budget change) invalidates that cache.
 - **Forecast (`packages/shared/src/budgetForecast.ts`):** pure, derived, never persisted. `budgetForecast` uses the active series (already zero-filled and clamped to today): `avgPerDay = spent / elapsedDays`; FULL projects `spent + avgPerDay × remainingDays` and exposes `allowedPerDay` (hidden when `remainingDays = 0`); DAILY has no nominal projection — only the average pace, today's remaining cap and `overDays` (caps reset daily).
 - **Historical (`historicalForecast`):** compares the first-half pace × total days against reality for a finished FULL budget (`tone: better | worse | close`, close = |surprise| < 10% of amount). DAILY past budgets show a "N dari M hari under cap" summary instead.
+- **Finished-period cap (`budgetCapTotal`):** `full` → `amount`; `daily` → `amount × inclusiveDayCount`. Everything that totals a WHOLE period (past card, Kelola rows, finished card, history `status`) compares `spent` against this — a daily cap resets every day, so `spent > amount` is normal and must never be read as "over". The past card also captions the derivation (`Rp70.000/hari × 31 hari`) so the denominator is never a magic number.
+- **Daily insights (`dailySpendStats`):** past-card grid = calendar average (`round(spent / days)`), days over the cap, and the most extreme days. Best/worst skip zero-spend days (they would always win) and each side is hidden when it never happened. Also feeds `zeroDays`.
+- **Day history:** the `+`/`−` per-day list (`BudgetDayHistory`) is shared by the active budget (series clamped to today) and a focused past budget (full range); 14 rows by default plus "Tampilkan N hari lainnya".
 - **Chart convention:** solid = actual, dashed/ghost = projection (`BudgetPeriodChart` `projection` prop). The full-range chart has no cap line; the cap/delta lives in the caption + the Insight `ForecastBar` section.
 - DTO: `BigInt → number`, timestamps via `toIsoWithOffset(row, APP_TIMEZONE)`.
 

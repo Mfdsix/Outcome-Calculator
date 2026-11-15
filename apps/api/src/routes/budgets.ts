@@ -1,4 +1,5 @@
 import {
+  budgetCapTotal,
   budgetProgressPct,
   budgetRangeToUtc,
   budgetStatus,
@@ -165,14 +166,22 @@ export const budgetRoutes: FastifyPluginAsync<BudgetRoutesOptions> = async (
         const bounds = rangeBounds(row, appTimezone);
         const spent = await spentInRange(userId, bounds.from, bounds.to);
         const amount = Number(row.amount);
+        const startDate = civilDateString(row.startDate);
+        const endDate = civilDateString(row.endDate);
+        const type = row.type as BudgetType;
+        // Finished periods compare against the WHOLE-range cap (plan §3):
+        // a daily cap resets every day, so `spent` vs the per-day `amount`
+        // would label every multi-day daily budget "over" by construction.
+        const capTotal = budgetCapTotal({ type, amount, startDate, endDate });
         return {
           id: row.id,
-          type: row.type as BudgetType,
+          type,
           amount,
-          startDate: civilDateString(row.startDate),
-          endDate: civilDateString(row.endDate),
+          startDate,
+          endDate,
           spent,
-          status: budgetStatus(spent, amount),
+          capTotal,
+          status: budgetStatus(spent, capTotal),
           createdAt: row.createdAt.toISOString(),
         } satisfies BudgetHistoryItem;
       }),

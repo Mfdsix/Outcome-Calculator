@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 
-import type { BudgetDayPoint, BudgetHistoryItem, BudgetStatus } from "@expense-app/shared";
+import type { BudgetHistoryItem, BudgetSeriesDay, BudgetStatus } from "@expense-app/shared";
 import {
+  budgetCapTotal,
   budgetProgressPct,
-  dailyDeltas,
-  fillDaySeries,
+  dailySpendStats,
   formatDateShort,
   formatIDR,
   historicalForecast,
+  inclusiveDayCount,
 } from "@expense-app/shared";
 
 import { BudgetPeriodChart } from "./BudgetPeriodChart";
@@ -16,8 +17,12 @@ import { APP_TIMEZONE } from "../lib/periods";
 
 export interface BudgetPastCardProps {
   budget: BudgetHistoryItem;
-  /** Sparse series (full range) or null while not loaded. */
-  series: BudgetDayPoint[] | null;
+  /**
+   * Zero-filled day series for the WHOLE range (deltas already applied for
+   * daily), or null while not loaded. Computed once by BudgetScreen and shared
+   * with the day-history list below the card.
+   */
+  days: BudgetSeriesDay[] | null;
   seriesLoading: boolean;
   seriesError: string | null;
   onUseAgain: () => void;
@@ -36,33 +41,28 @@ function shortDate(date: string): string {
 
 /**
  * Layer 3 (wireframe §6) — one compact card for a focused past budget:
- * head (finished badge + final status + spent/amount + progress), the full
- * period chart, the historical forecast reflection, and "Pakai lagi".
- * No edit/delete: only the active budget can be changed.
+ * head (finished badge + final status + spent/cap + progress), the full
+ * period chart, per-day insights, the historical forecast reflection, and
+ * "Pakai lagi". No edit/delete: only the active budget can be changed.
+ *
+ * Daily budgets compare their range TOTAL against the range cap
+ * (amount × days) — the per-day amount alone is not a total and produced
+ * nonsense like "Rp2.500.000 / Rp70.000 · lewat Rp2.300.000".
  */
 export function BudgetPastCard({
   budget,
-  series,
+  days,
   seriesLoading,
   seriesError,
   onUseAgain,
   onRetry,
 }: BudgetPastCardProps) {
   const chip = STATUS_CHIP[budget.status];
-  const progressPct = budgetProgressPct(budget.spent, budget.amount);
-  const remaining = budget.amount - budget.spent;
-
-  const days = useMemo(
-    () =>
-      series === null
-        ? null
-        : dailyDeltas(
-            fillDaySeries(series, budget.startDate, budget.endDate),
-            budget.amount,
-            budget.type,
-          ),
-    [series, budget.startDate, budget.endDate, budget.amount, budget.type],
-  );
+  const isDaily = budget.type === "daily";
+  const capTotal = budgetCapTotal(budget);
+  const progressPct = budgetProgressPct(budget.spent, capTotal);
+  const remaining = capTotal - budget.spent;
+  const rangeDays = inclusiveDayCount(budget.startDate, budget.endDate);
 
   const reflected = useMemo(() => {
     if (days === null) return null;
@@ -76,6 +76,14 @@ export function BudgetPastCard({
       now: new Date(),
     });
   }, [days, budget.type, budget.amount, budget.startDate, budget.endDate]);
+
+  const stats = useMemo(
+    () =>
+      days === null
+        ? null
+        : dailySpendStats({ days, amount: budget.amount, type: budget.type }),
+    [days, budget.amount, budget.type],
+  );
 
   return (
     <div
@@ -95,8 +103,13 @@ export function BudgetPastCard({
         <span data-testid="budget-past-spent" className="text-2xl">
           {formatIDR(budget.spent)}
         </span>
-        <span className="text-sm text-neutral-500"> / {formatIDR(budget.amount)}</span>
+        <span className="text-sm text-neutral-500"> / {formatIDR(capTotal)}</span>
       </p>
+      {isDaily && (
+        <p data-testid="budget-past-cap-caption" className="mt-0.5 text-[11px] text-neutral-500">
+          {formatIDR(budget.amount)}/hari × {rangeDays} hari
+        </p>
+      )}
 
       <div
         className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-800"
@@ -117,10 +130,11 @@ export function BudgetPastCard({
             ? `tersisa ${formatIDR(remaining)} dari cap`
             : `lewat ${formatIDR(-remaining)} dari cap`}
         </span>
-        <span className="tabular-nums">{Math.min(100, progressPct)}%</span>
+        {/* Real percentage (may exceed 100) — the bar itself stays clamped. */}
+        <span className="tabular-nums">{progressPct}%</span>
       </div>
 
-      {seriesLoading && series === null ? (
+      {seriesLoading && days === null ? (
         <ShimmerCard testid="budget-past-loading" label="Memuat riwayat budget" className="mt-3 h-32 w-full" />
       ) : seriesError !== null ? (
         <div
@@ -143,6 +157,10 @@ export function BudgetPastCard({
         </div>
       ) : null}
 
+      {stats !== null && (
+        <PastStatsGrid stats={stats} isDaily={isDaily} testid="budget-past-stats" />
+      )}
+
       {reflected !== null && reflected.available && (
         <HistoricalForecastRow reflected={reflected} amount={budget.amount} />
       )}
@@ -163,6 +181,96 @@ export function BudgetPastCard({
       >
         Pakai lagi →
       </button>
+    </div>
+  );
+}
+
+/** One labelled figure inside the past-card insight grid. */
+function PastStat({
+  label,
+  value,
+  tone,
+  testid,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  testid: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-widest text-neutral-500">{label}</p>
+      <p data-testid={testid} className={`truncate text-sm font-medium tabular-nums ${tone ?? "text-neutral-200"}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Insight grid (§6): daily average, days over the cap, and the most extreme
+ * days. Best/worst come from `dailySpendStats` and skip no-spend days, so
+ * "paling hemat" never just means "hari tanpa pengeluaran".
+ */
+function PastStatsGrid({
+  stats,
+  isDaily,
+  testid,
+}: {
+  stats: ReturnType<typeof dailySpendStats>;
+  isDaily: boolean;
+  testid: string;
+}) {
+  const best = stats.bestDay;
+  const worst = stats.worstDay;
+
+  return (
+    <div
+      data-testid={testid}
+      className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2"
+    >
+      <PastStat
+        label="Rata-rata harian"
+        value={formatIDR(stats.avgPerDay)}
+        testid="budget-past-stat-avg"
+      />
+      {isDaily ? (
+        <PastStat
+          label="Hari lewat cap"
+          value={`${stats.overDays ?? 0} dari ${stats.totalDays}`}
+          tone={stats.overDays !== null && stats.overDays > 0 ? "text-red-300" : "text-emerald-300"}
+          testid="budget-past-stat-overdays"
+        />
+      ) : (
+        <PastStat
+          label="Hari tanpa pengeluaran"
+          value={`${stats.zeroDays} dari ${stats.totalDays}`}
+          testid="budget-past-stat-zerodays"
+        />
+      )}
+      {best !== null && (
+        <PastStat
+          label="Paling hemat"
+          value={`${shortDate(best.date)} · +${formatIDR(best.delta)}`}
+          tone="text-emerald-300"
+          testid="budget-past-stat-best"
+        />
+      )}
+      {worst !== null && (
+        <PastStat
+          label="Paling boros"
+          value={`${shortDate(worst.date)} · −${formatIDR(-worst.delta)}`}
+          tone="text-red-300"
+          testid="budget-past-stat-worst"
+        />
+      )}
+      {isDaily && stats.zeroDays > 0 && (
+        <PastStat
+          label="Hari tanpa pengeluaran"
+          value={`${stats.zeroDays} dari ${stats.totalDays}`}
+          testid="budget-past-stat-zerodays"
+        />
+      )}
     </div>
   );
 }

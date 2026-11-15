@@ -80,6 +80,13 @@ export interface BudgetHistoryItem {
   startDate: string;
   endDate: string;
   spent: number;
+  /**
+   * Cap covering the WHOLE range — `full`: amount; `daily`: amount × days.
+   * Comparing `spent` against this is the only apples-to-apples ratio for a
+   * finished period (a daily cap resets every day, so `spent > amount` is
+   * normal and meaningless).
+   */
+  capTotal: number;
   status: BudgetStatus;
   /** Epoch ms of creation — the history list is sorted desc by this. */
   createdAt: string;
@@ -110,6 +117,21 @@ export function budgetCapForToday(budget: {
   amount: number;
 }): number {
   return budget.amount; // full: whole cap; daily: today's cap (same number)
+}
+
+/**
+ * Cap covering the WHOLE period (plan §3): `full` = amount, `daily` =
+ * amount × inclusive day count. This is what a finished period's total spend
+ * must be compared against — `amount` alone is a per-day figure for `daily`.
+ */
+export function budgetCapTotal(budget: {
+  type: BudgetType;
+  amount: number;
+  startDate: string;
+  endDate: string;
+}): number {
+  if (budget.type === "full") return budget.amount;
+  return budget.amount * inclusiveDayCount(budget.startDate, budget.endDate);
 }
 
 /** Status ladder: over → warning (≥80%) → ok. */

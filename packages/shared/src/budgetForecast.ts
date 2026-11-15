@@ -184,3 +184,92 @@ export function addDaysToCivil(date: string, offset: number): string {
   const pad = (value: number): string => String(value).padStart(2, "0");
   return `${shifted.year}-${pad(shifted.month)}-${pad(shifted.day)}`;
 }
+
+/** The most extreme day of a finished period (best/worst vs the daily cap). */
+export interface DailyHighlight {
+  date: string;
+  /** Spend on that day. */
+  total: number;
+  /** cap − total; > 0 under the cap, < 0 over it. */
+  delta: number;
+}
+
+export interface DailySpendStats {
+  /** Days in the series (zero-filled range). */
+  totalDays: number;
+  /** Σ of every day's total. */
+  spent: number;
+  /** Rata-rata kalender: round(spent / totalDays). */
+  avgPerDay: number;
+  /** Days with no spending at all. */
+  zeroDays: number;
+  /** DAILY only: days whose spend exceeded the cap. FULL: null. */
+  overDays: number | null;
+  /** DAILY only: spending days that stayed at/under the cap. FULL: null. */
+  underDays: number | null;
+  /**
+   * DAILY only: the day with the largest positive delta (most under cap).
+   * Days with no spending are EXCLUDED — they would always win and tell the
+   * user nothing (`zeroDays` reports them separately). null when no day
+   * landed under the cap. FULL: null.
+   */
+  bestDay: DailyHighlight | null;
+  /** DAILY only: the day with the largest negative delta. FULL: null. */
+  worstDay: DailyHighlight | null;
+}
+
+/**
+ * Per-day stats for a finished budget period (past card insights).
+ *
+ * `days` must be the zero-filled series for the WHOLE range. Ties keep the
+ * EARLIEST date (the series is chronological), so the result is deterministic.
+ */
+export function dailySpendStats(input: {
+  days: Array<{ date: string; total: number }>;
+  amount: number;
+  type: BudgetType;
+}): DailySpendStats {
+  const { days, amount, type } = input;
+  const totalDays = days.length;
+  const spent = sumTotals(days);
+  const avgPerDay = totalDays > 0 ? Math.round(spent / totalDays) : 0;
+
+  let zeroDays = 0;
+  let overDays = 0;
+  let underDays = 0;
+  let bestDay: DailyHighlight | null = null;
+  let worstDay: DailyHighlight | null = null;
+
+  for (const day of days) {
+    if (day.total === 0) {
+      zeroDays += 1;
+      continue;
+    }
+    if (type !== "daily") continue;
+
+    const delta = amount - day.total;
+    if (delta < 0) {
+      overDays += 1;
+      if (worstDay === null || delta < worstDay.delta) {
+        worstDay = { date: day.date, total: day.total, delta };
+      }
+    } else {
+      underDays += 1;
+      if (delta > 0 && (bestDay === null || delta > bestDay.delta)) {
+        bestDay = { date: day.date, total: day.total, delta };
+      }
+    }
+  }
+
+  const isDaily = type === "daily";
+  return {
+    totalDays,
+    spent,
+    avgPerDay,
+    zeroDays,
+    overDays: isDaily ? overDays : null,
+    underDays: isDaily ? underDays : null,
+    bestDay: isDaily ? bestDay : null,
+    worstDay: isDaily ? worstDay : null,
+  };
+}
