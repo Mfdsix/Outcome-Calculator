@@ -9,6 +9,10 @@ dist
 coverage
 .nyc_output
 
+# Tauri native shell — never needed by the API/web Docker builds (Rust
+# artifacts alone are several GB).
+apps/web/src-tauri
+
 # Env files (secrets) — never baked into images.
 .env
 .env.*
