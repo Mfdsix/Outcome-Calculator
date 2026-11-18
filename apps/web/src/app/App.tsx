@@ -35,6 +35,8 @@ import { Header } from "../components/Header";
 import { InsightScreen } from "../components/InsightScreen";
 import { InsightTicker } from "../components/InsightTicker";
 import { Keypad } from "../components/Keypad";
+import { EditPanel } from "../components/EditPanel";
+import { HistoryPane, type HistoryPaneHandle } from "../components/HistoryPane";
 import { NewPinDialog } from "../components/NewPinDialog";
 import { PeriodSelector } from "../components/PeriodSelector";
 import { LockScreen } from "../components/LockScreen";
@@ -50,6 +52,7 @@ import { useExpenses } from "../hooks/useExpenses";
 import { useFairTotal } from "../hooks/useFairTotal";
 import { useFairDayTotal } from "../hooks/useFairDayTotal";
 import { useInsights } from "../hooks/useInsights";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useOnline } from "../hooks/useOnline";
 import { useSync } from "../hooks/useSync";
 import { useTotalMode } from "../hooks/useTotalMode";
@@ -68,6 +71,7 @@ import { formatIDR, formatIDRAbbreviated, groupDigits } from "../lib/currency";
 import { digitKeyTestId, keyEl, triggerClicky } from "../lib/clicky";
 import { mutateOutbox, mutateTodayCache } from "../lib/offlineDb";
 import { APP_TIMEZONE, currentPeriodRange } from "../lib/periods";
+import { dateLabelFromKey, pairMidLabel } from "../lib/periodLabels";
 import { applyTheme } from "../lib/theme";
 import { loadTickerVisible, saveTickerVisible } from "../lib/tickerPref";
 import { useBudgetSnapshot } from "../lib/budgetSnapshot";
@@ -477,6 +481,16 @@ function AppBody({ logout }: { logout: () => void }) {
   // and must not share the row with the period strip or amount input.
   const isHomeScreen = !isSpecial && !isBudget && !isInsight;
 
+  // --- Wide-screen split layout (§wide) ---------------------------------------
+  // ≥768px: 50/50 grid — calculator left, D/W/M HistoryPane right. Budget/
+  // insight overlays and the mobile special mode keep the single column tree.
+  const isWide = useMediaQuery("(min-width: 768px)");
+  const showPane = isWide && !isBudget && !isInsight;
+  const paneRef = useRef<HistoryPaneHandle | null>(null);
+  /** HistoryPane scope (D/W/M) — lifted so the wide navbar's period strip can
+   * drive the right pane (same D/W/M contract as the mobile header). */
+  const [panePeriod, setPanePeriod] = useState<Period>("day");
+
   // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
 
   const online = useOnline({ failed: dayFetchFailed });
@@ -488,8 +502,7 @@ function AppBody({ logout }: { logout: () => void }) {
     logoutRef.current = logout;
   }, [logout]);
 
-  const showError = useCallback((message: string) => {
-    setBanner(message);
+  const showError = useCallback((message: string) => {    setBanner(message);
     if (bannerTimer.current) clearTimeout(bannerTimer.current);
     bannerTimer.current = setTimeout(() => setBanner(null), 4000);
   }, []);
@@ -1312,6 +1325,13 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     closeHistory();
   }, [closeHistory]);
 
+  // Entering the wide layout always leaves the fullscreen special history:
+  // the pane owns D/W/M there and the shared list must stay today-scoped for
+  // the calculator column (fair totals, header total, optimistic rows).
+  useEffect(() => {
+    if (isWide && isSpecial) handleCloseHistory();
+  }, [isWide, isSpecial, handleCloseHistory]);
+
   const handleNavigate = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
       switch (direction) {
@@ -1397,6 +1417,20 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     calc.startEdit(expense.id, expense.amount, expense.allocationType);
     handleCloseHistory();
   }, [calc, expenses, inDrill, period, specialPanel, drillDayKey, selectedKey, focusedDayKey, handleCloseHistory, transactionKey]);
+
+  /** Wide pane edit (§wide): the same calculator edit flow as handleEdit, but
+   * without a history origin to restore — the HistoryPane keeps its own state
+   * and stays visible while the left column edits. commitUpdate and
+   * handleEditBack fall back to editOriginal when the row is not in the day
+   * list (W/M pane rows come from the range fetch). */
+  const handlePaneEdit = useCallback(
+    (expense: ExpenseDto) => {
+      setEditOrigin(null);
+      setEditOriginal(expense);
+      calc.startEdit(expense.id, expense.amount, expense.allocationType);
+    },
+    [calc],
+  );
 
   const handleSpecialEnter = useCallback(() => {
     // Drill / day-summary: Enter edits the selected transaction directly.
@@ -1538,6 +1572,34 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
 
       if (showUnsaved || deleteTarget || pendingUpdate) return; // modal decision pending — ignore other keys
 
+      // Wide layout (§wide): the HistoryPane owns the arrow keys (up/down move
+      // the selection, left/right switch D←→W←→M / exit a drill). Digits,
+      // Backspace and Enter still belong to the calculator — Enter with an
+      // empty input activates the pane selection instead (drill / edit).
+      // While an edit is in progress the pane is hidden — arrows stay inert.
+      if (showPane && !calc.isEditing) {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          paneRef.current?.navigate("up");
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          paneRef.current?.navigate("down");
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          paneRef.current?.navigate("left");
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          paneRef.current?.navigate("right");
+          return;
+        }
+      }
+
       if (isSpecial) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
@@ -1574,6 +1636,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       } else if (event.key === "Enter") {
         event.preventDefault();
         triggerClicky(keyEl("key-enter"));
+        if (showPane && calc.amount <= 0 && !calc.isEditing) {
+          // Empty input: Enter activates the pane selection (drill into a
+          // W/M day / edit the selected transaction) instead of committing.
+          paneRef.current?.activate();
+          return;
+        }
         void handleEnter();
       }
     };
@@ -1595,6 +1663,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     handleCloseHistory,
     closeBudget,
     closeInsight,
+    showPane,
   ]);
 
    /** Clicking a chart bar: in day mode resolve to the first transaction in
@@ -1663,27 +1732,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       }));
   }, [drillDayKey, drillPairEndKey, expenses, inDrill, pendingIds]);
 
-  /** Build a civil date label (e.g. "15 Sep") from a YYYY-MM-DD bucket key. */
-  const dateLabelFromKey = (key: string): string => {
-    const parts = key.split("-").map(Number);
-    if (parts.length !== 3 || parts.some(Number.isNaN)) return key;
-    const [year, month, day] = parts;
-    const isoAtMidnight = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00+07:00`;
-    return formatDateShort(new Date(isoAtMidnight), APP_TIMEZONE);
-  };
-
-  /** Pair-range label for month drill/titles (e.g. "20–21 Sep", or "30 Sep–1 Okt").
-   * Without an endKey (orphan single) it degrades to the plain day label. */
-  const pairMidLabel = (startKey: string, endKey?: string): string => {
-    const startLabel = dateLabelFromKey(startKey);
-    if (!endKey || endKey === startKey) return startLabel;
-    const endLabel = dateLabelFromKey(endKey);
-    const [startDay, startMon] = startLabel.split(" ");
-    const [endDay, endMon] = endLabel.split(" ");
-    if (!startDay || !startMon || !endDay || !endMon) return startLabel;
-    return startMon === endMon ? `${startDay}–${endDay} ${startMon}` : `${startLabel}–${endLabel}`;
-  };
-
+  // dateLabelFromKey / pairMidLabel now live in ../lib/periodLabels (shared
+  // with the wide-screen HistoryPane).
   const summaryRows = useMemo<BrowseRow[]>(() => {
     if (inDrill) return [];
     // Day summary lists individual transactions; W/M summary lists per-day
@@ -1795,8 +1845,10 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return expense ? formatIDR(expense.amount) : "";
   })();
 
-  return (
-    <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
+  // --- Shared render blocks ------------------------------------------------------
+
+  const headerBlock = (
+    <>
        {/* Budget / Insight own their top bar (back + title) — the global header
            would be a second navbar there. Same hide rule as PeriodSelector. */}
        {!isBudget && !isInsight && (
@@ -1838,7 +1890,11 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           }
        />
        )}
+    </>
+  );
 
+  const banners = (
+    <>
       <UpdateBanner />
 
       {banner && (
@@ -1866,6 +1922,167 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
             : "Mendekati batas budget."}
         </div>
       )}
+    </>
+  );
+
+  // Mobile tree: header + banners stacked in the fullscreen single column.
+  const topChrome = (
+    <>
+      {headerBlock}
+      {banners}
+    </>
+  );
+
+  const dialogs = (
+    <>
+      {showUnsaved && (
+        <UnsavedDialog
+          onSave={() => {
+            setShowUnsaved(false);
+            void handleEnter();
+          }}
+          onDiscard={handleUnsavedDiscard}
+          onDismiss={handleUnsavedDismiss}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteDialog
+          amountLabel={deleteLabel}
+          busy={false}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void confirmDelete()}
+        />
+      )}
+
+      {pendingUpdate && (
+        <UpdateDialog
+          fromLabel={formatIDR(pendingUpdate.id === editOriginal?.id
+            ? editOriginal.amount
+            : (expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0))}
+          toLabel={formatIDR(pendingUpdate.amount)}
+          busy={false}
+          onCancel={() => setPendingUpdate(null)}
+          onConfirm={() => void confirmUpdate()}
+        />
+      )}
+    </>
+  );
+
+  const homeLead = isHomeScreen ? (
+    <>
+      {insightTickerVisible && <InsightTicker insights={insights} onOpen={openInsight} />}
+      <AmountDisplay display={calc.display} editing={calc.isEditing} flash={flash} />
+    </>
+  ) : null;
+
+  /** Calculator keypad — shared by the mobile home body and the wide column. */
+  const calcKeypad = (
+    <Keypad
+      onDigit={calc.pressDigit}
+      onBackspace={calc.pressBackspace}
+      onEnter={() => void handleEnter()}
+      enterFlash={enterFlash}
+      enterDisabled={
+        calc.amount <= 0 ||
+        Boolean(
+          calc.isEditing &&
+          calc.editingId &&
+          (editOriginal?.amount === calc.amount) &&
+          ((editOriginal?.allocationType ?? "NONE") === calc.allocationType),
+        )
+      }
+    />
+  );
+
+  const homeBody = (
+    <>
+      {(isHomeScreen && calc.isEditing) ? (
+        <AdvancedControls
+          allocationType={calc.allocationType}
+          onToggle={(type) => {
+            const next = type === "NONE" ? "NONE" : type;
+            calc.setAllocationType(next);
+          }}
+        />
+      ) : (
+        <BarChart buckets={chartBuckets} loading={loading && chartBuckets.length === 0} />
+      )}
+      {calcKeypad}
+    </>
+  );
+
+  // Wide layout (§wide): 50/50 split — calculator left, D/W/M HistoryPane
+  // right. The header block + period strip live in the LEFT column as the
+  // navbar; the pane is pure content (list + chart). The left chart is hidden
+  // in wide (the pane owns the hourly view); during an edit the right column
+  // swaps to the EditPanel (details + Back/Delete) while the pane keeps its
+  // state hidden.
+  if (showPane) {
+    return (
+      <div
+        data-testid="wide-layout"
+        className="relative grid h-dvh w-full grid-cols-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden px-6"
+      >
+        <div className="col-span-2 min-w-0">{banners}</div>
+        <div className="flex min-h-0 flex-col pr-4">
+          {headerBlock}
+          {/* Wide navbar period strip: highlighted period = the active pane
+              scope; tapping it resets the pane, other taps switch it. */}
+          <PeriodSelector
+            highlight={panePeriod}
+            onOpen={setPanePeriod}
+            onActiveTap={() => paneRef.current?.reset()}
+          />
+          {homeLead}
+          {calc.isEditing ? (
+            <AdvancedControls
+              allocationType={calc.allocationType}
+              onToggle={(type) => {
+                const next = type === "NONE" ? "NONE" : type;
+                calc.setAllocationType(next);
+              }}
+            />
+          ) : null}
+          {calcKeypad}
+        </div>
+        <div className="flex min-h-0 flex-col border-l border-neutral-800/70 pl-4">
+          {calc.isEditing && (
+            <EditPanel
+              expense={editOriginal}
+              amount={calc.amount}
+              allocationType={calc.allocationType}
+              onBack={handleEditBack}
+              onDelete={() => setDeleteTarget(calc.editingId)}
+            />
+          )}
+          {/* Pane stays mounted (selection/drill state kept) but yields the
+              column to the EditPanel while an edit is in progress. */}
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            style={calc.isEditing ? { display: "none" } : undefined}
+          >
+            <HistoryPane
+              ref={paneRef}
+              period={panePeriod}
+              onPeriodChange={setPanePeriod}
+              todayExpenses={expenses}
+              todayLoading={loading}
+              pendingIds={pendingIds}
+              refreshKey={fairExpensesSignature}
+              activeBudget={budget.active}
+              onEditExpense={handlePaneEdit}
+            />
+          </div>
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden px-4">
+      {topChrome}
 
       {!isBudget && !isInsight && (
         <PeriodSelector
@@ -1875,19 +2092,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         />
       )}
 
-      {isHomeScreen && (
-        <>
-           {insightTickerVisible && (
-            <InsightTicker insights={insights} onOpen={openInsight} />
-           )}
-
-           <AmountDisplay
-             display={calc.display}
-             editing={calc.isEditing}
-             flash={flash}
-           />
-        </>
-      )}
+      {homeLead}
 
        {isBudget ? (
          <BudgetScreen
@@ -1984,71 +2189,14 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           )}
         </>
       ) : (
-        <>
-          {(isHomeScreen && calc.isEditing) ? (
-            <AdvancedControls
-              allocationType={calc.allocationType}
-              onToggle={(type) => {
-                const next = type === "NONE" ? "NONE" : type;
-                calc.setAllocationType(next);
-              }}
-            />
-          ) : (
-            <BarChart buckets={chartBuckets} loading={loading && chartBuckets.length === 0} />
-          )}
-          <Keypad
-            onDigit={calc.pressDigit}
-            onBackspace={calc.pressBackspace}
-            onEnter={() => void handleEnter()}
-            enterFlash={enterFlash}
-            enterDisabled={
-              calc.amount <= 0 ||
-              Boolean(
-                calc.isEditing &&
-                calc.editingId &&
-                (editOriginal?.amount === calc.amount) &&
-                ((editOriginal?.allocationType ?? "NONE") === calc.allocationType),
-              )
-            }
-          />
-        </>
+        homeBody
       )}
 
       {calc.isEditing && !isSpecial && (
         <EditActions onBack={handleEditBack} onDelete={() => setDeleteTarget(calc.editingId)} />
       )}
 
-      {showUnsaved && (
-        <UnsavedDialog
-          onSave={() => {
-            setShowUnsaved(false);
-            void handleEnter();
-          }}
-          onDiscard={handleUnsavedDiscard}
-          onDismiss={handleUnsavedDismiss}
-        />
-      )}
-
-      {deleteTarget && (
-        <DeleteDialog
-          amountLabel={deleteLabel}
-          busy={false}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => void confirmDelete()}
-        />
-      )}
-
-      {pendingUpdate && (
-        <UpdateDialog
-          fromLabel={formatIDR(pendingUpdate.id === editOriginal?.id
-            ? editOriginal.amount
-            : (expenses.find((i) => i.id === pendingUpdate.id)?.amount ?? 0))}
-          toLabel={formatIDR(pendingUpdate.amount)}
-          busy={false}
-          onCancel={() => setPendingUpdate(null)}
-          onConfirm={() => void confirmUpdate()}
-        />
-      )}
+      {dialogs}
     </div>
   );
 }

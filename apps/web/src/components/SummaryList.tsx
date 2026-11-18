@@ -10,6 +10,9 @@ export interface SummaryListProps {
   onSelect: (key: string) => void;
   /** When true and rows are empty, show shimmer rows instead of "No data yet". */
   loading?: boolean;
+  /** Optional activate action (double-click on a row) — wide-screen HistoryPane
+   * drills into a selected day / edits the selected transaction. */
+  onActivate?: (key: string) => void;
 }
 
 /**
@@ -17,7 +20,7 @@ export interface SummaryListProps {
  * Label on the left, amount on the right. Selection highlights the row and
  * auto-scrolls it into view (useScrollSelected).
  */
-export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSelect, loading = false }: SummaryListProps) {
+export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSelect, loading = false, onActivate }: SummaryListProps) {
   if (rows.length === 0) {
     if (loading) return <ShimmerRows n={5} testid="summary-loading" label="Memuat riwayat" className="h-4 w-full" />;
     return (
@@ -39,6 +42,7 @@ export const SummaryList = memo(function SummaryList({ rows, selectedKey, onSele
             row={row}
             selectedKey={selectedKey}
             onSelect={onSelect}
+            onActivate={onActivate}
           />
         );
       })}
@@ -50,9 +54,10 @@ interface SummaryRowProps {
   row: BrowseRow;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  onActivate?: (key: string) => void;
 }
 
-function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
+function SummaryRow({ row, selectedKey, onSelect, onActivate }: SummaryRowProps) {
   const selected = row.key === selectedKey;
   const rowRef = useScrollSelected(selectedKey);
   return (
@@ -61,6 +66,7 @@ function SummaryRow({ row, selectedKey, onSelect }: SummaryRowProps) {
         ref={selected ? rowRef : undefined}
         type="button"
         onClick={() => onSelect(row.key)}
+        onDoubleClick={() => onActivate?.(row.key)}
         data-testid={`summary-row-${row.key}`}
         aria-pressed={selected}
         className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-2.5 text-left focus-visible:outline-none focus-visible:ring-0 transition-colors ${

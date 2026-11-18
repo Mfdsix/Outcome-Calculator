@@ -3,16 +3,23 @@ import type { ReactElement } from "react";
 export interface EditActionsProps {
   onBack: () => void;
   onDelete: () => void;
+  /** "floating" (default): viewport-floating strip, mobile edit contract.
+   * "static": in-flow block for the wide-screen edit panel (right column). */
+  variant?: "floating" | "static";
 }
 
-/** Floating action strip that appears while editing a transaction (spec plan §4d).
+/** Action strip that appears while editing a transaction (spec plan §4d).
  * Back (neutral) returns to history origin; Delete (red) opens the existing
  * DeleteDialog for the edited item. Rendered only when calc.isEditing. */
-export function EditActions({ onBack, onDelete }: EditActionsProps): ReactElement {
+export function EditActions({ onBack, onDelete, variant = "floating" }: EditActionsProps): ReactElement {
   return (
     <div
       data-testid="edit-actions"
-      className="pointer-events-auto absolute inset-x-4 top-[calc(4rem+1px)] z-30 flex gap-2 rounded-xl border border-neutral-800 bg-neutral-900/90 px-3 py-2 backdrop-blur"
+      className={`${
+        variant === "floating"
+          ? "pointer-events-auto absolute inset-x-4 top-[calc(4rem+1px)] z-30"
+          : "w-full"
+      } flex gap-2 rounded-xl border border-neutral-800 bg-neutral-900/90 px-3 py-2 backdrop-blur`}
     >
       <button
         type="button"
