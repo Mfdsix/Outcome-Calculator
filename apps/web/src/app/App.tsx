@@ -482,9 +482,10 @@ function AppBody({ logout }: { logout: () => void }) {
   const isHomeScreen = !isSpecial && !isBudget && !isInsight;
 
   // --- Wide-screen split layout (§wide) ---------------------------------------
-  // ≥768px: 50/50 grid — calculator left, D/W/M HistoryPane right. Budget/
-  // insight overlays and the mobile special mode keep the single column tree.
-  const isWide = useMediaQuery("(min-width: 768px)");
+  // ≥640px: 50/50 grid — calculator left, D/W/M HistoryPane right. Covers
+  // foldable inner screens (Galaxy Fold ~673px), iPad mini portrait (744px)
+  // and up; foldable outer screens (280–344px) stay on the mobile tree.
+  const isWide = useMediaQuery("(min-width: 640px)");
   const showPane = isWide && !isBudget && !isInsight;
   const paneRef = useRef<HistoryPaneHandle | null>(null);
   /** HistoryPane scope (D/W/M) — lifted so the wide navbar's period strip can
@@ -2022,10 +2023,10 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     return (
       <div
         data-testid="wide-layout"
-        className="relative grid h-dvh w-full grid-cols-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden px-6"
+        className="relative grid h-dvh w-full grid-cols-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden px-4 md:px-6"
       >
         <div className="col-span-2 min-w-0">{banners}</div>
-        <div className="flex min-h-0 flex-col pr-4">
+        <div className="flex min-h-0 flex-col pr-3 md:pr-4">
           {headerBlock}
           {/* Wide navbar period strip: highlighted period = the active pane
               scope; tapping it resets the pane, other taps switch it. */}
@@ -2046,7 +2047,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           ) : null}
           {calcKeypad}
         </div>
-        <div className="flex min-h-0 flex-col border-l border-neutral-800/70 pl-4">
+        <div className="flex min-h-0 flex-col border-l border-neutral-800/70 pl-3 md:pl-4">
           {calc.isEditing && (
             <EditPanel
               expense={editOriginal}
