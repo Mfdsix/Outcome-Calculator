@@ -55,7 +55,7 @@ export function Header({
   // fairBreakdown is null during loading (the hook resets it), so no [?] renders.
   if (totalLoading) {
     return (
-      <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
+      <header className="flex items-center justify-between px-1 pb-2 pt-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-sm font-medium text-neutral-400" data-testid="header-period-label">{periodLabel}</span>
           {status}
@@ -76,7 +76,7 @@ export function Header({
   }
 
   return (
-    <header className="flex items-baseline justify-between px-1 pb-2 pt-4">
+    <header className="flex items-center justify-between px-1 pb-2 pt-4">
       <div className="flex min-w-0 items-center gap-2">
         <span className="text-sm font-medium text-neutral-400" data-testid="header-period-label">{periodLabel}</span>
         {status}

@@ -19,6 +19,9 @@ export interface BrowseListProps {
   onSelect: (key: string) => void;
   /** When true and rows are empty, show shimmer rows while drilling loads. */
   loading?: boolean;
+  /** Optional activate action (double-click on a row) — wide-screen HistoryPane
+   * edits the selected transaction. */
+  onActivate?: (key: string) => void;
 }
 
 /**
@@ -26,7 +29,7 @@ export interface BrowseListProps {
  * transaction rows) and drill-down mode (transactions for a selected day).
  * Selection auto-scrolls into view.
  */
-export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect, loading = false }: BrowseListProps) {
+export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect, loading = false, onActivate }: BrowseListProps) {
   if (rows.length === 0) {
     if (loading) return <ShimmerRows n={5} testid="browse-loading" label="Memuat transaksi" className="h-4 w-full" />;
     return null;
@@ -43,6 +46,7 @@ export const BrowseList = memo(function BrowseList({ rows, selectedKey, onSelect
             row={row}
             selectedKey={selectedKey}
             onSelect={onSelect}
+            onActivate={onActivate}
           />
         );
       })}
@@ -54,9 +58,10 @@ interface BrowseRowItemProps {
   row: BrowseRow;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  onActivate?: (key: string) => void;
 }
 
-function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
+function BrowseRowItem({ row, selectedKey, onSelect, onActivate }: BrowseRowItemProps) {
   const selected = row.key === selectedKey;
   const rowRef = useScrollSelected(selectedKey);
   return (
@@ -65,6 +70,7 @@ function BrowseRowItem({ row, selectedKey, onSelect }: BrowseRowItemProps) {
         ref={selected ? rowRef : undefined}
         type="button"
         onClick={() => onSelect(row.key)}
+        onDoubleClick={() => onActivate?.(row.key)}
         data-testid={`browse-row-${row.key}`}
         aria-pressed={selected}
         className={`grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 px-1 py-3 text-left focus-visible:outline-none focus-visible:ring-0 transition-colors ${
