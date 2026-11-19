@@ -254,6 +254,102 @@ describe("App — wide-screen split layout (§wide)", () => {
   });
 });
 
+describe("App — wide menu slot (right column replaces, left stays home)", () => {
+  async function openBudget(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(await screen.findByTestId("user-menu-budget"));
+    await screen.findByTestId("budget-screen");
+  }
+
+  async function openInsight(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(await screen.findByTestId("user-menu-insight"));
+    await screen.findByTestId("insight-screen");
+  }
+
+  it("Budget replaces only the right column — calculator home stays mounted", async () => {
+    setWide(true);
+    const user = await renderUnlocked();
+
+    await openBudget(user);
+
+    expect(screen.getByTestId("wide-layout")).toBeInTheDocument();
+    // Left column keeps the full home contract.
+    expect(screen.getByTestId("keypad")).toBeInTheDocument();
+    expect(screen.getByTestId("amount-display")).toBeInTheDocument();
+    expect(screen.getByTestId("header-total")).toBeInTheDocument();
+    expect(screen.getByTestId("user-menu-button")).toBeInTheDocument();
+    // The history pane yields the column to the budget screen.
+    expect(screen.queryByTestId("history-pane")).not.toBeInTheDocument();
+
+    // Back hands the right column back to the pane; the left never moved.
+    await user.click(screen.getByTestId("budget-back"));
+    expect(await screen.findByTestId("history-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("keypad")).toBeInTheDocument();
+    expect(screen.getByTestId("amount-display")).toBeInTheDocument();
+  });
+
+  it("Insight replaces only the right column — calculator home stays mounted", async () => {
+    setWide(true);
+    const user = await renderUnlocked();
+
+    await openInsight(user);
+
+    expect(screen.getByTestId("wide-layout")).toBeInTheDocument();
+    expect(screen.getByTestId("keypad")).toBeInTheDocument();
+    expect(screen.getByTestId("amount-display")).toBeInTheDocument();
+    expect(screen.queryByTestId("history-pane")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("insight-back"));
+    expect(await screen.findByTestId("history-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("insight-screen")).not.toBeInTheDocument();
+  });
+
+  it("keyboard digits reach the calculator while Budget owns the right column", async () => {
+    setWide(true);
+    const user = await renderUnlocked();
+    await openBudget(user);
+
+    await user.keyboard("5");
+    expect(screen.getByTestId("amount-display")).toHaveTextContent("5");
+
+    // Escape closes the menu slot, not the calculator.
+    await user.keyboard("{Escape}");
+    expect(await screen.findByTestId("history-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("budget-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("amount-display")).toHaveTextContent("5");
+  });
+
+  it("period strip taps bring the history pane back for that scope", async () => {
+    setWide(true);
+    const user = await renderUnlocked();
+
+    await openBudget(user);
+    await user.click(screen.getByTestId("period-week"));
+    expect(await screen.findByTestId("pane-period-label")).toHaveTextContent("This Week");
+    expect(screen.queryByTestId("budget-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("keypad")).toBeInTheDocument();
+
+    // Tapping the highlighted active period does the same (D is active).
+    await openBudget(user);
+    await user.click(screen.getByTestId("period-day"));
+    expect(await screen.findByTestId("pane-period-label")).toHaveTextContent("Today");
+    expect(screen.queryByTestId("budget-screen")).not.toBeInTheDocument();
+  });
+
+  it("narrow screens still render Budget fullscreen (regression)", async () => {
+    const user = await renderUnlocked();
+
+    await user.click(screen.getByTestId("user-menu-button"));
+    await user.click(await screen.findByTestId("user-menu-budget"));
+
+    expect(await screen.findByTestId("budget-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("wide-layout")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("history-pane")).not.toBeInTheDocument();
+  });
+});
+
 /** Local alias so the mock's OfflineError class is referenceable. */
 class OfflineErrorNamed extends Error {
   status = 0;

@@ -486,11 +486,29 @@ function AppBody({ logout }: { logout: () => void }) {
   // foldable inner screens (Galaxy Fold ~673px), iPad mini portrait (744px)
   // and up; foldable outer screens (280–344px) stay on the mobile tree.
   const isWide = useMediaQuery("(min-width: 640px)");
-  const showPane = isWide && !isBudget && !isInsight;
+  /** True when the HistoryPane is the wide right column's current content. */
+  const paneVisible = isWide && !isBudget && !isInsight;
   const paneRef = useRef<HistoryPaneHandle | null>(null);
   /** HistoryPane scope (D/W/M) — lifted so the wide navbar's period strip can
    * drive the right pane (same D/W/M contract as the mobile header). */
   const [panePeriod, setPanePeriod] = useState<Period>("day");
+
+  /** Wide navbar strip: the right column is a single menu slot — picking a
+   * period always shows the HistoryPane for it, replacing Budget/Insight. */
+  const handleWidePeriodOpen = useCallback(
+    (next: Period) => {
+      setPanePeriod(next);
+      if (isBudget || isInsight) setViewModeExternal("calculator");
+    },
+    [isBudget, isInsight, setViewModeExternal],
+  );
+
+  /** Tapping the highlighted period resets the pane; if a menu owns the right
+   * column it also brings the history pane back. */
+  const handleWideActiveTap = useCallback(() => {
+    paneRef.current?.reset();
+    if (isBudget || isInsight) setViewModeExternal("calculator");
+  }, [isBudget, isInsight, setViewModeExternal]);
 
   // --- Connectivity + auto-sync (plan §6–§7) ---------------------------------
 
@@ -1541,13 +1559,16 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
       if (isBudget || isInsight) {
-        // Budget / insight screen: Escape returns to the calculator; digits
-        // stay inert (insight is never an edit origin).
+        // Budget / insight: Escape hands the right column back to the pane.
         if (event.key === "Escape") {
           if (isBudget) closeBudget();
           else closeInsight();
+          return;
         }
-        return;
+        // Mobile: these modes own the whole screen — digits stay inert
+        // (insight is never an edit origin). Wide: only the right column is
+        // replaced, so the left calculator keeps the digit/Enter keys.
+        if (!isWide) return;
       }
 
       const target = event.target as HTMLElement | null;
@@ -1578,7 +1599,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       // Backspace and Enter still belong to the calculator — Enter with an
       // empty input activates the pane selection instead (drill / edit).
       // While an edit is in progress the pane is hidden — arrows stay inert.
-      if (showPane && !calc.isEditing) {
+      if (paneVisible && !calc.isEditing) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
           paneRef.current?.navigate("up");
@@ -1637,7 +1658,7 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       } else if (event.key === "Enter") {
         event.preventDefault();
         triggerClicky(keyEl("key-enter"));
-        if (showPane && calc.amount <= 0 && !calc.isEditing) {
+        if (paneVisible && calc.amount <= 0 && !calc.isEditing) {
           // Empty input: Enter activates the pane selection (drill into a
           // W/M day / edit the selected transaction) instead of committing.
           paneRef.current?.activate();
@@ -1664,7 +1685,8 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     handleCloseHistory,
     closeBudget,
     closeInsight,
-    showPane,
+    paneVisible,
+    isWide,
   ]);
 
    /** Clicking a chart bar: in day mode resolve to the first transaction in
@@ -1851,8 +1873,10 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
   const headerBlock = (
     <>
        {/* Budget / Insight own their top bar (back + title) — the global header
-           would be a second navbar there. Same hide rule as PeriodSelector. */}
-       {!isBudget && !isInsight && (
+           would be a second navbar there. Same hide rule as PeriodSelector.
+           Wide is the exception: the left column is always home, so the header
+           stays even while a menu owns the right column. */}
+       {(isWide || (!isBudget && !isInsight)) && (
        <Header
           periodLabel={effectivePeriodLabel}
           totalLabel={isFairFallback ? `${displayLabel} ·raw` : displayLabel}
@@ -1970,7 +1994,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     </>
   );
 
-  const homeLead = isHomeScreen ? (
+  // Wide keeps the left column as home even while Budget/Insight owns the
+  // right column — the amount display + ticker never disappear there.
+  const homeLead = isHomeScreen || isWide ? (
     <>
       {insightTickerVisible && <InsightTicker insights={insights} onOpen={openInsight} />}
       <AmountDisplay display={calc.display} editing={calc.isEditing} flash={flash} />
@@ -2013,13 +2039,62 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
     </>
   );
 
-  // Wide layout (§wide): 50/50 split — calculator left, D/W/M HistoryPane
-  // right. The header block + period strip live in the LEFT column as the
-  // navbar; the pane is pure content (list + chart). The left chart is hidden
-  // in wide (the pane owns the hourly view); during an edit the right column
-  // swaps to the EditPanel (details + Back/Delete) while the pane keeps its
-  // state hidden.
-  if (showPane) {
+  /** Budget / Insight screens — shared by the mobile full-screen mode and the
+   * wide right column (where the left calculator stays home). */
+  const budgetScreen = (
+    <BudgetScreen
+      active={budget.active}
+      history={budget.history}
+      loading={budget.loading}
+      onBack={closeBudget}
+      onCreate={handleBudgetCreate}
+      onRemove={handleBudgetRemove}
+      series={budget.series}
+      seriesLoading={budget.seriesLoading}
+      focusedIndex={budget.focusedIndex}
+      onFocusChange={budget.setFocusedIndex}
+      budgetList={budget.list}
+      pastSeries={budget.pastSeries}
+      pastSeriesLoading={budget.pastSeriesLoading}
+      pastSeriesError={budget.pastSeriesError}
+      onRetryPastSeries={budget.retryPastSeries}
+      forecast={activeForecast}
+      budgetTodayMode={budgetTodayMode}
+      onToggleBudgetTodayMode={toggleBudgetTodayMode}
+      budgetTodaySpentFair={budgetFairTotal}
+      budgetTodayLoading={budgetFairLoading}
+      budgetTodayFairFallback={budgetTodayFairFallback}
+      budgetTodayFairBreakdown={budgetFairBreakdown}
+      budgetTodayFairInfoLabel="Rincian fair — Hari ini"
+      dashboardData={dashboardData}
+      winStreaks={winStreaks}
+    />
+  );
+
+  const insightScreen = (
+    <InsightScreen
+      insights={insights}
+      hasBudget={budget.active !== null}
+      tickerVisible={insightTickerVisible}
+      onToggleTicker={toggleTicker}
+      onBack={closeInsight}
+      onOpenBudget={openBudget}
+      forecast={activeForecast}
+      recovery={recovery}
+      activeBudget={
+        budget.active !== null
+          ? { type: budget.active.type, amount: budget.active.amount }
+          : null
+      }
+    />
+  );
+
+  // Wide layout (§wide): the left column is ALWAYS the home calculator; the
+  // right column is one menu slot. Budget / Insight / history (and the edit
+  // panel) replace each other there without ever displacing the calculator.
+  // The left chart stays hidden — when the right column is not the pane, the
+  // pane's chart is simply absent (the calculator keeps the full keypad).
+  if (isWide) {
     return (
       <div
         data-testid="wide-layout"
@@ -2029,11 +2104,12 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
         <div className="flex min-h-0 flex-col pr-3 md:pr-4">
           {headerBlock}
           {/* Wide navbar period strip: highlighted period = the active pane
-              scope; tapping it resets the pane, other taps switch it. */}
+              scope; tapping it resets the pane, other taps switch it (and
+              bring the pane back if a menu owns the right column). */}
           <PeriodSelector
             highlight={panePeriod}
-            onOpen={setPanePeriod}
-            onActiveTap={() => paneRef.current?.reset()}
+            onOpen={handleWidePeriodOpen}
+            onActiveTap={handleWideActiveTap}
           />
           {homeLead}
           {calc.isEditing ? (
@@ -2048,33 +2124,41 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
           {calcKeypad}
         </div>
         <div className="flex min-h-0 flex-col border-l border-neutral-800/70 pl-3 md:pl-4">
-          {calc.isEditing && (
-            <EditPanel
-              expense={editOriginal}
-              amount={calc.amount}
-              allocationType={calc.allocationType}
-              onBack={handleEditBack}
-              onDelete={() => setDeleteTarget(calc.editingId)}
-            />
+          {isBudget ? (
+            budgetScreen
+          ) : isInsight ? (
+            insightScreen
+          ) : (
+            <>
+              {calc.isEditing && (
+                <EditPanel
+                  expense={editOriginal}
+                  amount={calc.amount}
+                  allocationType={calc.allocationType}
+                  onBack={handleEditBack}
+                  onDelete={() => setDeleteTarget(calc.editingId)}
+                />
+              )}
+              {/* Pane stays mounted (selection/drill state kept) but yields the
+                  column to the EditPanel while an edit is in progress. */}
+              <div
+                className="flex min-h-0 flex-1 flex-col"
+                style={calc.isEditing ? { display: "none" } : undefined}
+              >
+                <HistoryPane
+                  ref={paneRef}
+                  period={panePeriod}
+                  onPeriodChange={setPanePeriod}
+                  todayExpenses={expenses}
+                  todayLoading={loading}
+                  pendingIds={pendingIds}
+                  refreshKey={fairExpensesSignature}
+                  activeBudget={budget.active}
+                  onEditExpense={handlePaneEdit}
+                />
+              </div>
+            </>
           )}
-          {/* Pane stays mounted (selection/drill state kept) but yields the
-              column to the EditPanel while an edit is in progress. */}
-          <div
-            className="flex min-h-0 flex-1 flex-col"
-            style={calc.isEditing ? { display: "none" } : undefined}
-          >
-            <HistoryPane
-              ref={paneRef}
-              period={panePeriod}
-              onPeriodChange={setPanePeriod}
-              todayExpenses={expenses}
-              todayLoading={loading}
-              pendingIds={pendingIds}
-              refreshKey={fairExpensesSignature}
-              activeBudget={budget.active}
-              onEditExpense={handlePaneEdit}
-            />
-          </div>
         </div>
         {dialogs}
       </div>
@@ -2096,49 +2180,9 @@ const handleBudgetRemove = useCallback(async () => budget.removeBudget(), [budge
       {homeLead}
 
        {isBudget ? (
-         <BudgetScreen
-           active={budget.active}
-           history={budget.history}
-           loading={budget.loading}
-           onBack={closeBudget}
-           onCreate={handleBudgetCreate}
-           onRemove={handleBudgetRemove}
-           series={budget.series}
-           seriesLoading={budget.seriesLoading}
-           focusedIndex={budget.focusedIndex}
-           onFocusChange={budget.setFocusedIndex}
-           budgetList={budget.list}
-           pastSeries={budget.pastSeries}
-           pastSeriesLoading={budget.pastSeriesLoading}
-           pastSeriesError={budget.pastSeriesError}
-           onRetryPastSeries={budget.retryPastSeries}
-           forecast={activeForecast}
-           budgetTodayMode={budgetTodayMode}
-           onToggleBudgetTodayMode={toggleBudgetTodayMode}
-            budgetTodaySpentFair={budgetFairTotal}
-            budgetTodayLoading={budgetFairLoading}
-            budgetTodayFairFallback={budgetTodayFairFallback}
-            budgetTodayFairBreakdown={budgetFairBreakdown}
-            budgetTodayFairInfoLabel="Rincian fair — Hari ini"
-            dashboardData={dashboardData}
-            winStreaks={winStreaks}
-          />
+         budgetScreen
       ) : isInsight ? (
-        <InsightScreen
-          insights={insights}
-          hasBudget={budget.active !== null}
-          tickerVisible={insightTickerVisible}
-          onToggleTicker={toggleTicker}
-          onBack={closeInsight}
-          onOpenBudget={openBudget}
-          forecast={activeForecast}
-          recovery={recovery}
-          activeBudget={
-            budget.active !== null
-              ? { type: budget.active.type, amount: budget.active.amount }
-              : null
-          }
-        />
+        insightScreen
       ) : isSpecial ? (
         <>
           {inDrill ? (

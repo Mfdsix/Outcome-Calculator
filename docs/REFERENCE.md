@@ -50,7 +50,8 @@ Lock (PIN) → Calculator home (Today) → Browse history (D/W/M) → Budget / I
 - **Calculator home:** Header + PeriodSelector + InsightTicker + AmountDisplay + BarChart (hourly) + Keypad (digits). Enter saves optimistically with green flash.
 - **Browse (`special` mode):** Tap D/W/M from home. Shows SummaryList + BarChart + nav Keypad. Enter on W/M drills into a day; Enter on day/drill edits the selected transaction.
 - **Edit:** Returns to calculator with floating Back/Delete strip. Save with no change = silent dismiss. Changed = confirm dialog. Dirty Back = unsaved-changes dialog.
-- **Budget / Insight:** Full-screen modes opened from user menu / ticker. Back or Escape returns home. Keypad digits are inert there.
+- **Budget / Insight:** Opened from the user menu / ticker. On narrow screens they own the full screen (Back or Escape returns home, keypad digits inert). On wide screens (≥640px) the left column always stays the home calculator — Budget/Insight (and the HistoryPane) replace each other in the right column only, Back/Escape hands that column back to the pane, and the D/W/M strip also swaps the pane back in. Digits/Enter keep working on the left calculator the whole time.
+- **Wide layout (§wide):** `grid-cols-2` split at ≥640px. Left = header + D/W/M strip + ticker + AmountDisplay + Keypad (no left chart — the pane owns the chart). Right = one menu slot: Budget → Insight → EditPanel → HistoryPane.
 
 ### ViewMode state (`types/ui.ts`, `hooks/useExpenses.ts`)
 - `ViewMode = calculator | special | budget | insight`
