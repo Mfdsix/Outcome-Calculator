@@ -1,0 +1,94 @@
+name: Deploy production
+
+# CI + CD in one workflow: `verify` must pass before anything touches the VPS.
+# First run needs the repository secrets listed in docs/DEPLOY.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deploys at once; queue them instead of cancelling (a cancelled
+# `docker compose up --build` in flight would leave the stack half-updated).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify (typecheck + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --include-workspace-root
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy to VPS
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://expense.zgenit.site
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
+      APP_DIR: ${{ secrets.APP_DIR }}
+    steps:
+      - name: Validate secrets
+        run: |
+          missing=0
+          for name in SSH_HOST SSH_USER SSH_KEY APP_DIR; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret: $name"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Prepare SSH
+        run: |
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$port" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run deploy on server
+        run: |
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key -p "$port" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$APP_DIR' && bash scripts/deploy.sh"
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -50,6 +50,10 @@ npm run dev                 # api + web
 
 ## Production deploy (HTTPS + PWA install)
 
+Deploy otomatis (GitHub Actions → SSH → VPS) sudah disiapkan: push ke `main`
+menjalankan verify + deploy, lalu mengecek port dan `GET /api/health`. Panduan
+lengkap (setup VPS, secrets, rollback, troubleshooting): **`docs/DEPLOY.md`**.
+
 Chrome only registers the service worker — and therefore only offers
 **Install app**, standalone launch and offline mode — over **HTTPS** (or
 localhost). Opening the plain `http://VPS:6600` debug port from a phone will
@@ -62,13 +66,17 @@ adds a Caddy edge that terminates TLS automatically:
    ACME challenge).
 3. Put the domain in the **root** `.env` (see `.env.example`):
    `CADDY_DOMAIN=expense.example.com`
-4. Start the prod stack:
+4. Start the prod stack (otomatis lewat CI, atau manual di VPS):
    ```bash
-   docker compose -f docker-compose.prod.yml up -d --build
+   # di VPS
+   bash scripts/deploy.sh
+   # atau tanpa CI sama sekali:
+   docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
    ```
    Caddy fetches/renews the certificate and redirects HTTP → HTTPS; everything
    (SPA, assets, `sw.js`, `manifest.webmanifest`, `/api`) is proxied to the
-   nginx `web` service.
+   nginx `web` service. Kalau VPS sudah punya nginx + certbot (lihat
+   `deploy/nginx-expense.conf`), jangan aktifkan profil `caddy`.
 5. On the phone: open `https://<domain>` once **online** → Chrome menu →
    **Install app** (not "Create shortcut"). After that first visit the whole
    app shell is precached: airplane mode + cold start still boots, and Today

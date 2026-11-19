@@ -27,12 +27,27 @@ services:
     environment:
       # Compose-internal address; overrides any localhost URL baked into apps/api/.env.
       DATABASE_URL: postgresql://expense:expense@postgres:5432/expense
+      # Short SHA of the deployed commit, exported by scripts/deploy.sh so
+      # GET /api/health can confirm which build is actually live.
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
     depends_on:
       postgres:
         condition: service_healthy
     # API is internal-only — not published to the host.
     expose:
       - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     build:
@@ -48,6 +63,13 @@ services:
       - "127.0.0.1:6600:80"
     depends_on:
       - api
+    healthcheck:
+      # nginx:alpine has no curl; busybox wget is enough for a local probe.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   # HTTPS edge — OPTIONAL (profile "caddy"). Only run this on a host WITHOUT
   # an existing nginx on 80/443: `docker compose -f docker-compose.prod.yml

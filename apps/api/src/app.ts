@@ -30,6 +30,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
     origin: true,
     methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"],
   });
+  // Liveness/readiness probe for CI/CD + uptime monitoring. Registered here so
+  // it exists regardless of auth setup; the auth hook in auth.ts explicitly
+  // exempts it from the bearer-token requirement. Checks the DB too, so a
+  // green deploy means the API can actually serve requests.
+  app.get("/api/health", async (_request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return {
+        status: "ok",
+        commit: process.env.GIT_COMMIT ?? "unknown",
+        uptime: Math.round(process.uptime()),
+      };
+    } catch {
+      return reply.code(503).send({ status: "db_down" });
+    }
+  });
+
   registerAuth(app, env.jwtSecret);
   await app.register(expenseRoutes, { prisma, appTimezone });
   await app.register(budgetRoutes, { prisma, appTimezone });

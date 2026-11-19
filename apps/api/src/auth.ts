@@ -184,6 +184,8 @@ export function registerAuth(app: FastifyInstance, jwtSecret: string): void {
   app.addHook("preHandler", async (request, reply) => {
     if (!request.url.startsWith("/api/")) return;
     if (request.method === "POST" && request.url.startsWith("/api/auth/login")) return;
+    // Public liveness probe (deploy script + monitoring); exposes no user data.
+    if (request.method === "GET" && request.url.split("?")[0] === "/api/health") return;
 
     const token = bearerFromRequest(request);
     if (!token) {
