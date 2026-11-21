@@ -11,3 +11,6 @@ apps/api/generated/
 apps/web/dev-dist/
 .kilo
 /generated/prisma
+
+# file override yang ditulis dashboard deployer
+deployer.override.yml
